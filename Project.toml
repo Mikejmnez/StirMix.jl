@@ -1,6 +1,6 @@
 name = "StirMix"
 uuid = "eaa79032-82a2-481f-867e-048f2cca00f3"
-authors = ["Miguel Jimenez-Urias <mjimenez@opendap.org> and contributors"]
+authors = ["Miguel A. Jimenez-Urias <mjimenez@opendap.org> and contributors"]
 version = "1.0.0-DEV"
 
 [compat]
