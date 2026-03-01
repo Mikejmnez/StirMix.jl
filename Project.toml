@@ -3,7 +3,11 @@ uuid = "eaa79032-82a2-481f-867e-048f2cca00f3"
 authors = ["Miguel A. Jimenez-Urias <mjimenez@opendap.org> and contributors"]
 version = "1.0.0-DEV"
 
+[deps]
+HillFunctions = "515440f5-9b45-477f-8bae-317e58dd4532"
+
 [compat]
+HillFunctions = "1.0.0"
 julia = "1.1"
 
 [extras]
