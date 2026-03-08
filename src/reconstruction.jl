@@ -27,9 +27,12 @@ f(y,t) =
 \\gamma_m \\, e^{-t(m^2 + K_k^2)} \\, \\cos(my),
 """
 function reconstruct!(f, U, γ, COStail, γtail, m_tail, tmp, t, Kk)
-    Nk = size(U, 2)
+    fill!(f, zero(eltype(f)))
+    Nuse = min(size(U, 2), length(γ))
     # Gravest part
-    mul!(f, U, @view γ[1:Nk])
+    if Nuse > 0
+        mul!(@view(f[:]), @view(U[:, 1:Nuse]), @view(γ[1:Nuse]))
+    end
     # Tail part
     if !isempty(m_tail)
         k2 = Kk^2
@@ -60,6 +63,14 @@ function reconstruct_fourier_series(x::AbstractVector, a0::Real,
     @inbounds for k in 1:K
         wk = k * ω0
         f .+= a[k] .* cos.(wk .* x) .+ b[k] .* sin.(wk .* x)
+    end
+    return f
+end
+
+function reconstruct_from_complex_coeffs(x, K, C)
+    f = zeros(Float64, length(x))
+    for k in eachindex(K)
+        f .+= real.(C[k] .* exp.(im .* K[k] .* x))
     end
     return f
 end

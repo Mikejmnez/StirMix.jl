@@ -14,10 +14,10 @@ struct SpectralBasis
     qs
     β0
     β
-    avals
-    bvals
+    an
+    bn
     Ak
     Bk
-    Phi_e
-    Phi_o
+    Φe
+    Φo
 end

@@ -38,17 +38,60 @@ end
 
 
 """
-Precompute cosine basis matrix for modes m = m1:m2 using cos(2m*y).
-Returns B of size (ny, m2-m1+1).
+    complex_x_coeffs(ce, co)
+
+Convert cosine/sine Fourier coefficients in x into complex coefficients C
+such that
+
+    real(C[k] * exp(im*K[k]*x)) = ce[k]*cos(K[k]*x) + co[k]*sin(K[k]*x)
+
+Hence:
+    C[k] = ce[k] - im*co[k]
 """
-function cosine_basis(y, m1, m2)
-    ny = length(y)
-    M  = m2 - m1 + 1
-    B  = Matrix{Float64}(undef, ny, M)
-    for (j, m) in enumerate(m1:m2)
-        @inbounds B[:, j] .= cos.(2*m .* y)
+function complex_x_coeffs(ce::AbstractVector, co::AbstractVector)
+    @assert length(ce) == length(co) "ce and co must have the same length"
+    return complex.(ce, .-co)
+end
+
+
+"""
+    cosine_tail_data(y, γ, Nn)
+
+Build the cosine basis and coefficient views for the tail modes m = Nn:Mmax,
+where Mmax = length(γ) - 1.
+
+Returns `(m_tail, Btail, γtail, tmp)` where:
+
+- `m_tail` : vector of mode indices Nn:Mmax
+- `Btail`  : cosine basis matrix with columns cos.(2m*y)
+- `γtail`  : view into γ corresponding to modes Nn:Mmax
+- `tmp`    : work array similar to γtail
+
+If `Mmax < Nn`, returns empty objects of compatible size.
+"""
+function cosine_tail_data(y::AbstractVector, γ::AbstractVector, Nn::Integer)
+    Mmax = length(γ) - 1
+
+    if Mmax >= Nn
+        m_tail = collect(Nn:Mmax)                  # modes m = Nn, ..., Mmax
+        Mt = length(m_tail)
+        ny = length(y)
+
+        Btail = Matrix{Float64}(undef, ny, Mt)
+        for (j, m) in enumerate(m_tail)
+            @inbounds Btail[:, j] .= cos.(2m .* y)
+        end
+
+        γtail = @view γ[(Nn+1):(Mmax+1)]           # γ[mode m] stored at index m+1
+        tmp = similar(γtail)
+    else
+        m_tail = Int[]
+        Btail = zeros(Float64, length(y), 0)
+        γtail = @view γ[1:0]
+        tmp = similar(γtail)
     end
-    return B
+
+    return m_tail, Btail, γtail, tmp
 end
 
 """
@@ -78,10 +121,10 @@ function spectral_basis(U, Pe, domain::Domain, Ns)
     qs, β0, β = flow_decomposition(U, Pe, domain)
 
     _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β)
-    Phi_e = sweep_even_eigenfunctions(Ak, domain.y)
+    Φe = sweep_even_eigenfunctions(Ak, domain.y)
 
     _, bvals, Bk = collect_sweep_eigen(Odd, qs, Ns, β)
-    Phi_o = sweep_odd_eigenfunctions(Bk, domain.y)
+    Φo = sweep_odd_eigenfunctions(Bk, domain.y)
 
-    return SpectralBasis(qs, β0, β, avals, bvals, Ak, Bk, Phi_e, Phi_o)
+    return SpectralBasis(qs, β0, β, avals, bvals, Ak, Bk, Φe, Φo)
 end

@@ -15,9 +15,13 @@ include("reconstruction.jl")
 export domain,
     flow_decomposition,
     reconstruct_fourier_series,
-    cosine_basis,
+    cosine_tail_data,
     reconstruct!,
     normal_mode_decomposition,
-    spectral_basis
+    spectral_basis,
+    precompute_x_phase,
+    complex_x_coeffs,
+    reconstruct_from_complex_coeffs,
+    reconstruct_x!
 
 end
