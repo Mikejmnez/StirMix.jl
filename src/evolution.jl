@@ -42,3 +42,211 @@ function reconstruct_x!(T::AbstractMatrix{<:Real},
     @. T = real(Tc)
     return T
 end
+
+
+function prepare_mode_data(dom, basis, γ, Ccoeffs)
+    nk = length(dom.K)
+
+    phases = Vector{Vector{ComplexF64}}(undef, nk)
+    tails  = Vector{Any}(undef, nk)
+    work   = Vector{Any}(undef, nk)
+
+    for k in 1:nk
+        Φe = basis.Φe[k]
+        Ak = basis.Ak[k]
+        an = basis.an[k]
+
+        ny, Nn = size(Φe)
+
+        phases[k] = Ccoeffs[k] .* exp.(im .* dom.K[k] .* dom.x)
+        tails[k]  = cosine_tail_data(dom.y, γ, Nn)
+
+        e = Vector{eltype(an)}(undef, Nn)
+        C = similar(Ak)
+        Umat = Matrix{promote_type(eltype(Φe), eltype(Ak), eltype(an))}(undef, ny, Nn)
+        Tf = promote_type(eltype(Umat), eltype(γ))
+        f = Vector{Tf}(undef, ny)
+
+        work[k] = (e=e, C=C, U=Umat, f=f)
+    end
+
+    return phases, tails, work
+end
+
+
+function prepare_mode_data_avg(dom, Ak, avals, γ, Ccoeffs; conj_spectrum=false)
+    nk = length(dom.K)
+
+    phases = Vector{Vector{ComplexF64}}(undef, nk)
+    work   = Vector{Any}(undef, nk)
+
+    for k in 1:nk
+        Akk = conj_spectrum ? conj.(Ak[k])    : Ak[k]
+        ank = conj_spectrum ? conj.(avals[k]) : avals[k]
+
+        Nn = length(ank)
+        Nγ = min(length(γ), size(Akk, 1))
+
+        phases[k] = Ccoeffs[k] .* exp.(im .* dom.K[k] .* dom.x)
+
+        A0 = vec(Akk[1, :])
+
+        Tmode = promote_type(eltype(Akk), eltype(ank), eltype(γ))
+        γproj = Vector{Tmode}(undef, Nn)
+        e     = Vector{Tmode}(undef, Nn)
+
+        mul!(γproj, transpose(view(Akk, 1:Nγ, :)), view(γ, 1:Nγ))
+
+        work[k] = (
+            A0    = A0,
+            an    = ank,
+            γproj = γproj,
+            e     = e,
+        )
+    end
+
+    return phases, work
+end
+
+function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe)
+    conj_spectrum = Pe < 0
+    nt = length(tvals)
+    ny = length(dom.y)
+    nx = length(dom.x)
+    nk = length(dom.K)
+
+    T = zeros(Float64, nt, ny, nx)
+
+    phases, tails, work = prepare_mode_data(dom, basis, γ, Ccoeffs)
+
+    Tt = zeros(Float64, ny, nx)
+
+    for (it, t) in enumerate(tvals)
+        fill!(Tt, 0.0)
+
+        for k in 1:nk
+            Φe = conj_spectrum ? conj.(basis.Φe[k]) : basis.Φe[k]
+            Ak = conj_spectrum ? conj.(basis.Ak[k]) : basis.Ak[k]
+            an = conj_spectrum ? conj.(basis.an[k]) : basis.an[k]
+            Kk = dom.K[k]
+
+            e = work[k].e
+            C = work[k].C
+            Umat = work[k].U
+            f = work[k].f
+
+            m_tail, Atail, γtail, tmp = tails[k]
+
+            e .= exp.(-t .* (an ./ 4 .+ Kk^2 .+ (im * (basis.β0/2) * Kk * Pe)))
+            C .= Ak .* reshape(e, 1, :)
+            mul!(Umat, Φe, transpose(C))
+
+            reconstruct!(f, Umat, γ, Atail, γtail, m_tail, tmp, t, Kk)
+
+            BLAS.ger!(1.0, real(f), real(phases[k]), Tt)
+            BLAS.ger!(-1.0, imag(f), imag(phases[k]), Tt)
+        end
+
+        T[it, :, :] .= Tt;
+    end
+
+    return T
+end
+
+
+"""
+    time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
+
+Discretize a real-valued periodic signal `ft` into a piecewise-constant signal
+with levels spaced by
+
+    Δ = 1 / 2^nt
+
+over the interval [-1, 1].
+
+Returns `(nft, vals, ivals)` where
+
+- `nft`   : discretized signal
+- `vals`  : all allowed discrete values, ordered increasingly
+- `ivals` : indices such that `vals[ivals[i]] == nft[i]`
+
+Notes:
+- `ivals` uses Julia's 1-based indexing.
+- This version uses nearest-level rounding, which reproduces the Python
+  midpoint logic efficiently.
+"""
+function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
+    nt < 0 && throw(ArgumentError("nt must be >= 0"))
+
+    T = float(eltype(ft))
+    Δ = one(T) / T(2^nt)
+
+    # Allowed values: -1, ..., -Δ, 0, Δ, ..., 1
+    vals = collect(-one(T):Δ:one(T))
+
+    nft = Vector{T}(undef, length(ft))
+    ivals = Vector{Int}(undef, length(ft))
+
+    offset = Int(round(one(T) / Δ)) + 1   # maps 0 -> center index
+
+    @inbounds for i in eachindex(ft)
+        # nearest allowed level
+        y = clamp(Δ * round(T(ft[i]) / Δ), -one(T), one(T))
+        nft[i] = y
+
+        # map y to its position in vals
+        ivals[i] = Int(round(y / Δ)) + offset
+    end
+
+    return nft, vals, ivals
+end
+
+
+function solve_explicit_avg(dom, U, γ, Ccoeffs, tvals, Pe, Ns)
+    conj_spectrum = Pe < 0
+    Peabs = abs(Pe)
+
+    qs, β0, β = flow_decomposition(U, Peabs, dom)
+    _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β)
+
+    nt = length(tvals)
+    nx = length(dom.x)
+    nk = length(dom.K)
+
+    T  = zeros(Float64, nt, nx)
+    Tt = zeros(Float64, nx)
+
+    phases, work = prepare_mode_data_avg(dom, Ak, avals, γ, Ccoeffs;
+                                         conj_spectrum=conj_spectrum)
+
+    βshift = im * (β0 / 2) * Pe
+
+    for (it, t) in enumerate(tvals)
+        fill!(Tt, 0.0)
+
+        for k in 1:nk
+            Kk    = dom.K[k]
+            pk    = phases[k]
+
+            A0    = work[k].A0
+            an    = work[k].an
+            γproj = work[k].γproj
+            e     = work[k].e
+
+            @. e = exp(-t * (an / 4 + Kk^2 + βshift * Kk))
+
+            favg = zero(eltype(e))
+            @inbounds @simd for n in eachindex(e)
+                favg += A0[n] * e[n] * γproj[n]
+            end
+
+            @inbounds @simd for ix in eachindex(Tt, pk)
+                Tt[ix] += real(favg) * real(pk[ix]) - imag(favg) * imag(pk[ix])
+            end
+        end
+
+        T[it, :] .= Tt
+    end
+
+    return T
+end

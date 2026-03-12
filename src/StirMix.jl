@@ -22,6 +22,9 @@ export domain,
     precompute_x_phase,
     complex_x_coeffs,
     reconstruct_from_complex_coeffs,
+    solve_explicit,
+    solve_explicit_avg,
+    time_resample,
     reconstruct_x!
 
 end
