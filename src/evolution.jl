@@ -74,39 +74,41 @@ function prepare_mode_data(dom, basis, γ, Ccoeffs)
 end
 
 
-function prepare_mode_data_avg(dom, Ak, avals, γ, Ccoeffs; conj_spectrum=false)
+function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe; conj_spectrum=false)
     nk = length(dom.K)
 
-    phases = Vector{Vector{ComplexF64}}(undef, nk)
-    work   = Vector{Any}(undef, nk)
+    Tmode = promote_type(eltype(Ak[1]), eltype(avals[1]), eltype(float(γ[1])))
+    Tmode = promote_type(eltype(Ak[1]), eltype(avals[1]), eltype(γ))
+
+    work = Vector{AvgModeWork{Tmode}}(undef, nk)
+
+    βshift = im * (β0 / 2) * Pe
 
     for k in 1:nk
         Akk = conj_spectrum ? conj.(Ak[k])    : Ak[k]
         ank = conj_spectrum ? conj.(avals[k]) : avals[k]
 
         Nn = length(ank)
-        Nγ = min(length(γ), size(Akk, 1))
-
-        phases[k] = Ccoeffs[k] .* exp.(im .* dom.K[k] .* dom.x)
-
-        A0 = vec(Akk[1, :])
-
-        Tmode = promote_type(eltype(Akk), eltype(ank), eltype(γ))
+        A0 = Vector{Tmode}(undef, Nn)
         γproj = Vector{Tmode}(undef, Nn)
-        e     = Vector{Tmode}(undef, Nn)
+        e = Vector{Tmode}(undef, Nn)
+        λ = Vector{Tmode}(undef, Nn)
+
+        Nγ = min(length(γ), size(Akk, 1))
+        Kk = dom.K[k]
+
+        copyto!(A0, vec(Akk[1, :]))
 
         mul!(γproj, transpose(view(Akk, 1:Nγ, :)), view(γ, 1:Nγ))
+        
+        @. λ = ank / 4 + Kk^2 + βshift * Kk
 
-        work[k] = (
-            A0    = A0,
-            an    = ank,
-            γproj = γproj,
-            e     = e,
-        )
+        work[k] = AvgModeWork(A0, λ, γproj, e)
     end
 
-    return phases, work
+    return work
 end
+
 
 function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe)
     conj_spectrum = Pe < 0
@@ -202,12 +204,7 @@ function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
 end
 
 
-function solve_explicit_avg(dom, U, γ, Ccoeffs, tvals, Pe, Ns)
-    conj_spectrum = Pe < 0
-    Peabs = abs(Pe)
-
-    qs, β0, β = flow_decomposition(U, Peabs, dom)
-    _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β)
+function evolve_explicit_avg(dom, prep, tvals)
 
     nt = length(tvals)
     nx = length(dom.x)
@@ -216,37 +213,84 @@ function solve_explicit_avg(dom, U, γ, Ccoeffs, tvals, Pe, Ns)
     T  = zeros(Float64, nt, nx)
     Tt = zeros(Float64, nx)
 
-    phases, work = prepare_mode_data_avg(dom, Ak, avals, γ, Ccoeffs;
-                                         conj_spectrum=conj_spectrum)
-
-    βshift = im * (β0 / 2) * Pe
-
+    work = prep.work
+    phase = prep.phase
+    
     for (it, t) in enumerate(tvals)
         fill!(Tt, 0.0)
 
         for k in 1:nk
-            Kk    = dom.K[k]
-            pk    = phases[k]
+            wk = work[k]
+            A0    = wk.A0
+            λ     = wk.λ
+            γproj = wk.γproj
+            e     = wk.e
 
-            A0    = work[k].A0
-            an    = work[k].an
-            γproj = work[k].γproj
-            e     = work[k].e
-
-            @. e = exp(-t * (an / 4 + Kk^2 + βshift * Kk))
+            @. e = exp(-t * λ)
 
             favg = zero(eltype(e))
             @inbounds @simd for n in eachindex(e)
                 favg += A0[n] * e[n] * γproj[n]
             end
 
-            @inbounds @simd for ix in eachindex(Tt, pk)
-                Tt[ix] += real(favg) * real(pk[ix]) - imag(favg) * imag(pk[ix])
+            ar = real(favg)
+            ai = imag(favg)
+
+            pr = phase.p0r[k]
+            pi = phase.p0i[k]
+            wr = phase.ωr[k]
+            wi = phase.ωi[k]
+
+            @inbounds for ix in 1:nx
+                Tt[ix] += ar * pr - ai * pi
+                pr, pi = pr * wr - pi * wi, pr * wi + pi * wr
             end
         end
 
-        T[it, :] .= Tt
+        copyto!(@view(T[it, :]), Tt)
     end
 
     return T
+end
+
+
+function prepare_explicit_avg(dom, U, γ, Ccoeffs, Pe, Ns)
+    conj_spectrum = Pe < 0
+    Peabs = abs(Pe)
+    Nmax = length(γ)
+
+    qs, β0, β = flow_decomposition(U, Peabs, dom)
+    _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β; Nmax=Nmax)
+
+    work = prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe;
+                                 conj_spectrum=conj_spectrum)
+
+    phase = prepare_phase_data_avg(dom, Ccoeffs)
+
+    return (; β0, work, phase)
+end
+
+function prepare_phase_data_avg(dom, Ccoeffs)
+    nk = length(dom.K)
+    x = dom.x
+    x1 = x[1]
+    dx = x[2] - x[1]
+
+    ωr  = Vector{Float64}(undef, nk)
+    ωi  = Vector{Float64}(undef, nk)
+    p0r = Vector{Float64}(undef, nk)
+    p0i = Vector{Float64}(undef, nk)
+
+    for k in 1:nk
+        Kk = dom.K[k]
+
+        ωr[k] = cos(Kk * dx)
+        ωi[k] = sin(Kk * dx)
+
+        p0 = Ccoeffs[k] * cis(Kk * x1)
+        p0r[k] = real(p0)
+        p0i[k] = imag(p0)
+    end
+
+    return (; ωr, ωi, p0r, p0i)
 end

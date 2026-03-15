@@ -21,3 +21,10 @@ struct SpectralBasis
     Φe
     Φo
 end
+
+struct AvgModeWork{T}
+    A0::Vector{T}
+    λ::Vector{T}
+    γproj::Vector{T}
+    e::Vector{T}
+end

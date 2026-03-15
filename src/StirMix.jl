@@ -23,7 +23,10 @@ export domain,
     complex_x_coeffs,
     reconstruct_from_complex_coeffs,
     solve_explicit,
-    solve_explicit_avg,
+    prepare_mode_data_avg,
+    prepare_explicit_avg,
+    prepare_phase_data_avg,
+    evolve_explicit_avg,
     time_resample,
     reconstruct_x!
 
