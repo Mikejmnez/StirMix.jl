@@ -99,26 +99,56 @@ Takes a shear flow returns the canonical parameters
 q = 2ikPe and the even Fourier coefficients that describe the flow β_0, β_e, 
 that are used to 
 """
-function flow_decomposition(U, Pe, domain::Domain)
+function flow_decomposition(U::AbstractVector, Pe, domain::Domain)
     y = domain.y
     Lx = domain.Ny
     K = domain.K
     qs = Complex{Float64}.(im .* big.(2*K*Pe)) # <--- make complex bigfloat?
-    β0, β, βo = normal_mode_decomposition(U, y; Lx)
+    β0, β, _ = normal_mode_decomposition(U, y; Lx)
 
     # TODO
     # If flow not even, compute its even periodic extension and 
     # halve the domain (i.e. focus on a single half).
 
-    return qs, β0, β
+    return qs, U, β0, β
 end
+
+"""
+
+"""
+function flow_decomposition(flow::Symbol, Pe, domain::Domain)
+    K = domain.K
+    qs = Complex{Float64}.(im .* big.(2*K*Pe)) # <--- make complex bigfloat?
+
+    U, β0, β = predefined_flow(flow, domain; Nmodes=length(K))
+
+    return qs, U, β0, β
+end
+
 
 """
 collects all eigenpairs including eigenfunction sweeps for the entire range of
     alongstream wavenumber space.
 """
-function spectral_basis(U, Pe, domain::Domain, Ns)
-    qs, β0, β = flow_decomposition(U, Pe, domain)
+function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns)
+    qs, _, β0, β = flow_decomposition(U, Pe, domain)
+
+    _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β)
+    Φe = sweep_even_eigenfunctions(Ak, domain.y)
+
+    _, bvals, Bk = collect_sweep_eigen(Odd, qs, Ns, β)
+    Φo = sweep_odd_eigenfunctions(Bk, domain.y)
+
+    return SpectralBasis(qs, β0, β, avals, bvals, Ak, Bk, Φe, Φo)
+end
+
+
+"""
+collects all eigenpairs including eigenfunction sweeps for the entire range of
+    alongstream wavenumber space.
+"""
+function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns)
+    qs, _, β0, β = flow_decomposition(flow, Pe, domain)
 
     _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β)
     Φe = sweep_even_eigenfunctions(Ak, domain.y)

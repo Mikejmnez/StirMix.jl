@@ -139,7 +139,7 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe)
 
             m_tail, Atail, γtail, tmp = tails[k]
 
-            e .= exp.(-t .* (an ./ 4 .+ Kk^2 .+ (im * (basis.β0/2) * Kk * Pe)))
+            e .= exp.(-t .* ((an ./ 4) .+ Kk^2 .+ (im * (basis.β0) * Kk * Pe)))
             C .= Ak .* reshape(e, 1, :)
             mul!(Umat, Φe, transpose(C))
 
@@ -254,12 +254,28 @@ function evolve_explicit_avg(dom, prep, tvals)
 end
 
 
-function prepare_explicit_avg(dom, U, γ, Ccoeffs, Pe, Ns)
+function prepare_explicit_avg(dom, U::AbstractVector, γ, Ccoeffs, Pe, Ns)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
 
-    qs, β0, β = flow_decomposition(U, Peabs, dom)
+    qs, _, β0, β = flow_decomposition(U, Peabs, dom)
+    _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β; Nmax=Nmax)
+
+    work = prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe;
+                                 conj_spectrum=conj_spectrum)
+
+    phase = prepare_phase_data_avg(dom, Ccoeffs)
+
+    return (; β0, work, phase)
+end
+
+function prepare_explicit_avg(dom, flow::Symbol, γ, Ccoeffs, Pe, Ns)
+    conj_spectrum = Pe < 0
+    Peabs = abs(Pe)
+    Nmax = length(γ)
+
+    qs, _, β0, β = flow_decomposition(flow, Peabs, dom)
     _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β; Nmax=Nmax)
 
     work = prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe;

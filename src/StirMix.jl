@@ -28,6 +28,7 @@ export domain,
     prepare_phase_data_avg,
     evolve_explicit_avg,
     time_resample,
-    reconstruct_x!
+    reconstruct_x!,
+    predefined_flow
 
 end
