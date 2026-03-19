@@ -4,18 +4,42 @@ predefined_flow(flow::Symbol, dom; Nmodes=length(dom.K)-1) = predefined_flow(Val
 
 function predefined_flow(::Val{:cos}, dom; Nmodes=length(dom.K)-1)
     U = (1 .- cos.(2 .* dom.y)) ./ 2
-    beta0 = 1.0
-    beta = zeros(Float64, Nmodes)
+    β0 = 1.0
+    β = zeros(Float64, Nmodes)
     if Nmodes >= 1
-        beta[1] = -0.5
+        β[1] = -0.5
     end
-    return U, beta0, beta
+    return U, β0, β
 end
 
 function predefined_flow(::Val{:square}, dom; Nmodes=length(dom.K)-1)
     y = dom.y
-    U = Float64.((π/4 .<= y) .& (y .<= 3π/4))
-    beta0 = 1.0
-    beta = [2 * (-1)^m / (m * pi) * sin(m * pi / 2) for m in 1:Nmodes]
-    return U, beta0, beta
+    U = Float64.((pi/4 .<= y) .& (y .<= 3pi/4))
+    β0 = 1.0
+    β = [2 * (-1)^m / (m * pi) * sin(m * pi / 2) for m in 1:Nmodes]
+    return U, β0, β
 end
+
+
+function predefined_flow(::Val{:poiseuille}, dom; Nmodes=length(dom.K)-1)
+    y = dom.y
+    U = 1 .- ((y .- pi/2)/(pi/2)).^2 
+    # two lines below are wrong!
+    β0 = 2/3
+    β = [4 * (-1)^m / (m^2) for m in 1:Nmodes]
+    #
+    return U, β0, β
+end
+
+function predefined_flow(::Val{:gaussian}, dom; Nmodes=length(dom.K)-1)
+    y = dom.y
+    Ld = 0.8
+    U = exp.(− (Ld^2) .* (2y .− π) .^ 2 )
+    β = [(1/(Ld*sqrt(pi)))*(-1)^m * exp(-(m/(2Ld))^2) for m in 0:Nmodes]
+    β0 = β[1]
+    return U, β0, β[2:end]
+end
+
+
+
+

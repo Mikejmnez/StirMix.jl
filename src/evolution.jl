@@ -139,7 +139,7 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe)
 
             m_tail, Atail, γtail, tmp = tails[k]
 
-            e .= exp.(-t .* ((an ./ 4) .+ Kk^2 .+ (im * (basis.β0) * Kk * Pe)))
+            e .= exp.(-t .* ((an ./ 4) .+ Kk^2 .+ (im * (basis.β0/2) * Kk * Pe)))
             C .= Ak .* reshape(e, 1, :)
             mul!(Umat, Φe, transpose(C))
 
