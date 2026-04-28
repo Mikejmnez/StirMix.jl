@@ -204,56 +204,6 @@ function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
 end
 
 
-function evolve_explicit_avg(dom, prep, tvals)
-
-    nt = length(tvals)
-    nx = length(dom.x)
-    nk = length(dom.K)
-
-    T  = zeros(Float64, nt, nx)
-    Tt = zeros(Float64, nx)
-
-    work = prep.work
-    phase = prep.phase
-    
-    for (it, t) in enumerate(tvals)
-        fill!(Tt, 0.0)
-
-        for k in 1:nk
-            wk = work[k]
-            A0    = wk.A0
-            λ     = wk.λ
-            γproj = wk.γproj
-            e     = wk.e
-
-            @. e = exp(-t * λ)
-
-            favg = zero(eltype(e))
-            @inbounds @simd for n in eachindex(e)
-                favg += A0[n] * e[n] * γproj[n]
-            end
-
-            ar = real(favg)
-            ai = imag(favg)
-
-            pr = phase.p0r[k]
-            pi = phase.p0i[k]
-            wr = phase.ωr[k]
-            wi = phase.ωi[k]
-
-            @inbounds for ix in 1:nx
-                Tt[ix] += ar * pr - ai * pi
-                pr, pi = pr * wr - pi * wi, pr * wi + pi * wr
-            end
-        end
-
-        copyto!(@view(T[it, :]), Tt)
-    end
-
-    return T
-end
-
-
 function prepare_explicit_avg(dom, U::AbstractVector, γ, Ccoeffs, Pe, Ns)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
@@ -286,6 +236,7 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Ccoeffs, Pe, Ns)
     return (; β0, work, phase)
 end
 
+
 function prepare_phase_data_avg(dom, Ccoeffs)
     nk = length(dom.K)
     x = dom.x
@@ -309,4 +260,72 @@ function prepare_phase_data_avg(dom, Ccoeffs)
     end
 
     return (; ωr, ωi, p0r, p0i)
+end
+
+
+
+using Base.Threads
+
+function evolve_explicit_avg(dom, prep, tvals)
+    nt = length(tvals)
+    nx = length(dom.x)
+    nk = length(dom.K)
+    nthreads_ = nthreads()
+
+    T = zeros(Float64, nt, nx)
+
+    # One private Tt buffer per thread
+    Tlocal = [zeros(Float64, nx) for _ in 1:nthreads_]
+
+    work  = prep.work
+    phase = prep.phase
+
+    for (it, t) in enumerate(tvals)
+        # reset thread-local accumulators
+        for buf in Tlocal
+            fill!(buf, 0.0)
+        end
+
+        @threads for k in 1:nk
+            tid = threadid()
+            Tt = Tlocal[tid]
+
+            wk = work[k]
+            A0    = wk.A0
+            λ     = wk.λ
+            γproj = wk.γproj
+            e     = wk.e
+
+            @. e = exp(-t * λ)
+
+            favg = zero(eltype(e))
+            @inbounds @simd for n in eachindex(e)
+                favg += A0[n] * e[n] * γproj[n]
+            end
+
+            ar = real(favg)
+            ai = imag(favg)
+
+            pr = phase.p0r[k]
+            pi = phase.p0i[k]
+            wr = phase.ωr[k]
+            wi = phase.ωi[k]
+
+            @inbounds for ix in 1:nx
+                Tt[ix] += ar * pr - ai * pi
+                pr, pi = pr * wr - pi * wi, pr * wi + pi * wr
+            end
+        end
+
+        # reduce thread-local buffers into output row
+        row = @view T[it, :]
+        fill!(row, 0.0)
+        for tid in 1:nthreads_
+            @inbounds @simd for ix in 1:nx
+                row[ix] += Tlocal[tid][ix]
+            end
+        end
+    end
+
+    return T
 end
