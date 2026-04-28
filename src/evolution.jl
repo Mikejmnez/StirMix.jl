@@ -204,7 +204,7 @@ function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
 end
 
 
-function prepare_explicit_avg(dom, U::AbstractVector, γ, Ccoeffs, Pe, Ns)
+function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
@@ -215,12 +215,11 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Ccoeffs, Pe, Ns)
     work = prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe;
                                  conj_spectrum=conj_spectrum)
 
-    phase = prepare_phase_data_avg(dom, Ccoeffs)
-
-    return (; β0, work, phase)
+    return (; β0, work)
 end
 
-function prepare_explicit_avg(dom, flow::Symbol, γ, Ccoeffs, Pe, Ns)
+
+function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
@@ -231,9 +230,7 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Ccoeffs, Pe, Ns)
     work = prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe;
                                  conj_spectrum=conj_spectrum)
 
-    phase = prepare_phase_data_avg(dom, Ccoeffs)
-
-    return (; β0, work, phase)
+    return (; β0, work)
 end
 
 
@@ -263,10 +260,9 @@ function prepare_phase_data_avg(dom, Ccoeffs)
 end
 
 
-
 using Base.Threads
 
-function evolve_explicit_avg(dom, prep, tvals)
+function evolve_explicit_avg(dom, prep, Ccoeffs, tvals)
     nt = length(tvals)
     nx = length(dom.x)
     nk = length(dom.K)
@@ -278,7 +274,7 @@ function evolve_explicit_avg(dom, prep, tvals)
     Tlocal = [zeros(Float64, nx) for _ in 1:nthreads_]
 
     work  = prep.work
-    phase = prep.phase
+    phase = prepare_phase_data_avg(dom, Ccoeffs)
 
     for (it, t) in enumerate(tvals)
         # reset thread-local accumulators
