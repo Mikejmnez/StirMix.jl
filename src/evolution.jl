@@ -234,93 +234,44 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns)
 end
 
 
-function prepare_phase_data_avg(dom, Ccoeffs)
-    nk = length(dom.K)
-    x = dom.x
-    x1 = x[1]
-    dx = x[2] - x[1]
-
-    ωr  = Vector{Float64}(undef, nk)
-    ωi  = Vector{Float64}(undef, nk)
-    p0r = Vector{Float64}(undef, nk)
-    p0i = Vector{Float64}(undef, nk)
-
-    for k in 1:nk
-        Kk = dom.K[k]
-
-        ωr[k] = cos(Kk * dx)
-        ωi[k] = sin(Kk * dx)
-
-        p0 = Ccoeffs[k] * cis(Kk * x1)
-        p0r[k] = real(p0)
-        p0i[k] = imag(p0)
-    end
-
-    return (; ωr, ωi, p0r, p0i)
-end
-
-
-using Base.Threads
 
 function evolve_explicit_avg(dom, prep, Ccoeffs, tvals)
     nt = length(tvals)
     nx = length(dom.x)
-    nk = length(dom.K)
-    nthreads_ = nthreads()
 
     T = zeros(Float64, nt, nx)
+    spec = zeros(ComplexF64, nx ÷ 2 + 1)
 
-    # One private Tt buffer per thread
-    Tlocal = [zeros(Float64, nx) for _ in 1:nthreads_]
-
-    work  = prep.work
-    phase = prepare_phase_data_avg(dom, Ccoeffs)
+    x0 = dom.x[1]
 
     for (it, t) in enumerate(tvals)
-        # reset thread-local accumulators
-        for buf in Tlocal
-            fill!(buf, 0.0)
-        end
+        fill!(spec, 0)
 
-        @threads for k in 1:nk
-            tid = threadid()
-            Tt = Tlocal[tid]
+        for k in eachindex(dom.K)
+            wk = prep.work[k]
 
-            wk = work[k]
-            A0    = wk.A0
-            λ     = wk.λ
-            γproj = wk.γproj
-            e     = wk.e
+            @. wk.e = exp(-t * wk.λ)
 
-            @. e = exp(-t * λ)
-
-            favg = zero(eltype(e))
-            @inbounds @simd for n in eachindex(e)
-                favg += A0[n] * e[n] * γproj[n]
+            # Modal averages may use high precision; 
+            # FFTW reconstruction is intentionally Float64.
+            favg = zero(eltype(wk.e))
+            @inbounds @simd for n in eachindex(wk.e)
+                favg += wk.A0[n] * wk.e[n] * wk.γproj[n]
             end
 
-            ar = real(favg)
-            ai = imag(favg)
+            # Big/complex arithmetic may happen above; FFTW boundary is here.
+            z = ComplexF64(favg * Ccoeffs[k] * cis(dom.K[k] * x0))
 
-            pr = phase.p0r[k]
-            pi = phase.p0i[k]
-            wr = phase.ωr[k]
-            wi = phase.ωi[k]
+            m = k - 1
 
-            @inbounds for ix in 1:nx
-                Tt[ix] += ar * pr - ai * pi
-                pr, pi = pr * wr - pi * wi, pr * wi + pi * wr
+            if m == 0 || (iseven(nx) && m == nx ÷ 2)
+                spec[k] = nx * real(z)
+            else
+                spec[k] = (nx / 2) * z
             end
         end
 
-        # reduce thread-local buffers into output row
-        row = @view T[it, :]
-        fill!(row, 0.0)
-        for tid in 1:nthreads_
-            @inbounds @simd for ix in 1:nx
-                row[ix] += Tlocal[tid][ix]
-            end
-        end
+        T[it, :] .= irfft(spec, nx)
     end
 
     return T
