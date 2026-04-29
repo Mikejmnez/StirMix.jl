@@ -44,10 +44,15 @@ function reconstruct_x!(T::AbstractMatrix{<:Real},
 end
 
 
-function prepare_mode_data(dom, basis, γ, Ccoeffs)
+@inline function _irfft_self_conjugate_mode(k::Integer, nx::Integer)
+    m = k - 1
+    return m == 0 || (iseven(nx) && m == nx ÷ 2)
+end
+
+
+function _prepare_mode_work(dom, basis, γ)
     nk = length(dom.K)
 
-    phases = Vector{Vector{ComplexF64}}(undef, nk)
     tails  = Vector{Any}(undef, nk)
     work   = Vector{Any}(undef, nk)
 
@@ -58,7 +63,6 @@ function prepare_mode_data(dom, basis, γ, Ccoeffs)
 
         ny, Nn = size(Φe)
 
-        phases[k] = Ccoeffs[k] .* exp.(im .* dom.K[k] .* dom.x)
         tails[k]  = cosine_tail_data(dom.y, γ, Nn)
 
         e = Vector{eltype(an)}(undef, Nn)
@@ -69,6 +73,20 @@ function prepare_mode_data(dom, basis, γ, Ccoeffs)
 
         work[k] = (e=e, C=C, U=Umat, f=f)
     end
+
+    return tails, work
+end
+
+
+function prepare_mode_data(dom, basis, γ, Ccoeffs)
+    nk = length(dom.K)
+
+    phases = Vector{Vector{ComplexF64}}(undef, nk)
+    for k in 1:nk
+        phases[k] = Ccoeffs[k] .* exp.(im .* dom.K[k] .* dom.x)
+    end
+
+    tails, work = _prepare_mode_work(dom, basis, γ)
 
     return phases, tails, work
 end
@@ -119,12 +137,13 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe)
 
     T = zeros(Float64, nt, ny, nx)
 
-    phases, tails, work = prepare_mode_data(dom, basis, γ, Ccoeffs)
+    tails, work = _prepare_mode_work(dom, basis, γ)
 
-    Tt = zeros(Float64, ny, nx)
+    spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
+    x0 = dom.x[1]
 
     for (it, t) in enumerate(tvals)
-        fill!(Tt, 0.0)
+        fill!(spectrum, 0)
 
         for k in 1:nk
             Φe = conj_spectrum ? conj.(basis.Φe[k]) : basis.Φe[k]
@@ -145,11 +164,22 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe)
 
             reconstruct!(f, Umat, γ, Atail, γtail, m_tail, tmp, t, Kk)
 
-            BLAS.ger!(1.0, real(f), real(phases[k]), Tt)
-            BLAS.ger!(-1.0, imag(f), imag(phases[k]), Tt)
+            # Modal reconstruction may use high precision; FFTW x-inversion is Float64.
+            phase0 = Ccoeffs[k] * cis(Kk * x0)
+            col = @view spectrum[:, k]
+            if _irfft_self_conjugate_mode(k, nx)
+                @inbounds @simd for iy in 1:ny
+                    col[iy] = nx * real(ComplexF64(f[iy] * phase0))
+                end
+            else
+                scale = nx / 2
+                @inbounds @simd for iy in 1:ny
+                    col[iy] = scale * ComplexF64(f[iy] * phase0)
+                end
+            end
         end
 
-        T[it, :, :] .= Tt;
+        @views T[it, :, :] .= irfft(spectrum, nx, 2)
     end
 
     return T
@@ -262,9 +292,7 @@ function evolve_explicit_avg(dom, prep, Ccoeffs, tvals)
             # Big/complex arithmetic may happen above; FFTW boundary is here.
             z = ComplexF64(favg * Ccoeffs[k] * cis(dom.K[k] * x0))
 
-            m = k - 1
-
-            if m == 0 || (iseven(nx) && m == nx ÷ 2)
+            if _irfft_self_conjugate_mode(k, nx)
                 spec[k] = nx * real(z)
             else
                 spec[k] = (nx / 2) * z
