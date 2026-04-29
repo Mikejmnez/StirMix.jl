@@ -23,11 +23,9 @@ end
 
 function predefined_flow(::Val{:poiseuille}, dom; Nmodes=length(dom.K)-1)
     y = dom.y
-    U = 1 .- ((y .- pi/2)/(pi/2)).^2 
-    # two lines below are wrong!
-    β0 = 2/3
-    β = [4 * (-1)^m / (m^2) for m in 1:Nmodes]
-    #
+    U = 1 .- ((y .- pi/2)/(pi/2)).^2
+    β0 = 4/3
+    β = -[(4 /pi^2) / (m^2) for m in 1:Nmodes]
     return U, β0, β
 end
 
