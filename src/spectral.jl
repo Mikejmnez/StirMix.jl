@@ -158,16 +158,23 @@ function _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
                                   idx, qbatch, domain, Ns, β;
                                   Nmax=nothing,
                                   compute_eigenfunctions::Bool=true,
+                                  progress=nothing,
+                                  advance_progress=nothing,
                                   compute_odd::Bool=true)
     isempty(idx) && return nothing
 
-    qvec, avals, Ak_batch = collect_sweep_eigen(Even, qbatch, Ns, β; Nmax=Nmax)
+    nbatch = length(qbatch)
+
+    qvec, avals, Ak_batch = collect_sweep_eigen(Even, qbatch, Ns, β; Nmax=Nmax, progress=progress)
     Φe_batch = compute_eigenfunctions ? sweep_even_eigenfunctions(Ak_batch, domain.y) : nothing
+    compute_eigenfunctions && advance_progress !== nothing && advance_progress(nbatch)
+
 
     bvals = Bk_batch = Φo_batch = nothing
     if compute_odd
-        _, bvals, Bk_batch = collect_sweep_eigen(Odd, qbatch, Ns, β; Nmax=Nmax)
+        _, bvals, Bk_batch = collect_sweep_eigen(Odd, qbatch, Ns, β; Nmax=Nmax, progress=progress)
         Φo_batch = compute_eigenfunctions ? sweep_odd_eigenfunctions(Bk_batch, domain.y) : nothing
+        compute_eigenfunctions && advance_progress !== nothing && advance_progress(nbatch)
     end
 
     for (j, k) in pairs(idx)
@@ -196,6 +203,7 @@ end
 function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
                                 Nmax=nothing,
                                 precision_policy=:mixed,
+                                show_progress::Bool=false,
                                 qc1=10000, qc2=30000,
                                 compute_eigenfunctions::Bool=true,
                                 compute_odd::Bool=true)
@@ -212,24 +220,68 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
 
     qdata = _q_values(domain.K, Pe; precision_policy=precision_policy, qc1=qc1, qc2=qc2)
 
-    _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
-                             qdata.idx64, qdata.qs64, domain, Ns, β;
-                             Nmax=Nmax,
-                             compute_eigenfunctions=compute_eigenfunctions,
-                             compute_odd=compute_odd)
+    # create one progress bar here
+    nq = nk
+    @assert nq == length(qdata.idx64) + length(qdata.idxbig) + length(qdata.idxHR)
 
-    _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
-                             qdata.idxbig, qdata.qsbig, domain, Ns, β;
-                             Nmax=Nmax,
-                             compute_eigenfunctions=compute_eigenfunctions,
-                             compute_odd=compute_odd)
+    passes = 1 + Int(compute_odd)
+    eigenfunction_passes = compute_eigenfunctions ? passes : 0
+    total = nq * (passes + eigenfunction_passes)
 
-    _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
-                             qdata.idxHR, qdata.qsHR, domain, Ns, β;
-                             Nmax=Nmax,
-                             compute_eigenfunctions=compute_eigenfunctions,
-                             compute_odd=compute_odd)
+    # define one local advance
+    p = show_progress && total > 0 ?
+        Progress(total; desc="Computing spectral basis") :
+        nothing
 
+    processed = Ref(0)
+
+    advance_progress = p === nothing ? nothing : n -> begin
+        processed[] += n
+        update!(p, processed[])
+        return nothing
+    end
+    
+    progress = advance_progress === nothing ? nothing :
+        ((_iq, _nq, _q) -> advance_progress(1))
+
+    completed = false
+
+    try
+
+        _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
+                                 qdata.idx64, qdata.qs64, domain, Ns, β;
+                                 Nmax=Nmax,
+                                 compute_eigenfunctions=compute_eigenfunctions,
+                                 progress=progress,
+                                 advance_progress=advance_progress,
+                                 compute_odd=compute_odd)
+
+        _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
+                                 qdata.idxbig, qdata.qsbig, domain, Ns, β;
+                                 Nmax=Nmax,
+                                 compute_eigenfunctions=compute_eigenfunctions,
+                                 progress=progress,
+                                 advance_progress=advance_progress,
+                                 compute_odd=compute_odd)
+
+        _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
+                                 qdata.idxHR, qdata.qsHR, domain, Ns, β;
+                                 Nmax=Nmax,
+                                 progress=progress,
+                                 advance_progress=advance_progress,
+                                 compute_eigenfunctions=compute_eigenfunctions,
+                                 compute_odd=compute_odd)
+        completed = true
+
+    finally
+        if p !== nothing
+            if completed
+                finish!(p)
+            else
+                cancel(p, "Spectral basis computation aborted")
+            end
+        end
+    end
     return (; qs, an, bn, Ak, Bk, Φe, Φo)
 end
 
@@ -242,10 +294,12 @@ returned but `Φe` and `Φo` are set to `nothing`.
 """
 function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
                         precision_policy=:mixed, qc1=10000, qc2=30000,
-                        compute_eigenfunctions::Bool=true)
+                        compute_eigenfunctions::Bool=true,
+                        show_progress::Bool=false)
     _, β0, β = flow_decomposition(U, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
                                   precision_policy=precision_policy, qc1=qc1, qc2=qc2,
+                                  show_progress=show_progress,
                                   compute_eigenfunctions=compute_eigenfunctions)
 
     return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk,
@@ -261,10 +315,12 @@ returned but `Φe` and `Φo` are set to `nothing`.
 """
 function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns;
                         precision_policy=:mixed, qc1=10000, qc2=30000,
-                        compute_eigenfunctions::Bool=true)
+                        compute_eigenfunctions::Bool=true,
+                        show_progress::Bool=false)
     _, β0, β = flow_decomposition(flow, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
                                   precision_policy=precision_policy, qc1=qc1, qc2=qc2, 
+                                  show_progress=show_progress,
                                   compute_eigenfunctions=compute_eigenfunctions)
 
     return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk,

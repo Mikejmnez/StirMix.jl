@@ -1,6 +1,7 @@
 module StirMix
 
 # Write your package code here.
+using ProgressMeter
 using FFTW
 using HillFunctions
 using LinearAlgebra

@@ -20,6 +20,26 @@ using Test
         @test mixed_basis.Bk !== nothing
         @test any(q -> q isa ComplexF64, mixed_basis.qs)
         @test any(q -> q isa Complex{BigFloat}, mixed_basis.qs)
+
+        float64_progress_basis = redirect_stdout(devnull) do
+            redirect_stderr(devnull) do
+                spectral_basis(:cos, 1.0, dom, 10;
+                               precision_policy=:float64,
+                               show_progress=true)
+            end
+        end
+        mixed_progress_basis = redirect_stdout(devnull) do
+            redirect_stderr(devnull) do
+                spectral_basis(:cos, 10000.0, dom, 10;
+                               precision_policy=:mixed,
+                               compute_eigenfunctions=false,
+                               show_progress=true)
+            end
+        end
+
+        @test length(float64_progress_basis.qs) == length(dom.K)
+        @test length(mixed_progress_basis.qs) == length(dom.K)
+        @test any(q -> q isa Complex{BigFloat}, mixed_progress_basis.qs)
     end
 
     @testset "averaged preparation reuses mixed spectral data" begin
