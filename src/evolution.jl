@@ -131,7 +131,8 @@ function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe; conj_spectrum=false)
 end
 
 
-function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe)
+function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe;
+                        show_progress::Bool=false)
     conj_spectrum = Pe < 0
     nt = length(tvals)
     ny = length(dom.y)
@@ -145,49 +146,73 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe)
     spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
     x0 = dom.x[1]
 
-    for (it, t) in enumerate(tvals)
-        fill!(spectrum, 0)
+    # define progressmeter instance
+    p = show_progress && nt > 0 ?
+        Progress(nt; desc="Computing time-evolving solution") :
+        nothing
+    
+    processed = Ref(0)
 
-        for k in 1:nk
-            Φe = conj_spectrum ? conj.(basis.Φe[k]) : basis.Φe[k]
-            Ak = conj_spectrum ? conj.(basis.Ak[k]) : basis.Ak[k]
-            an = conj_spectrum ? conj.(basis.an[k]) : basis.an[k]
-            Kk = dom.K[k]
-
-            e = work[k].e
-            C = work[k].C
-            Umat = work[k].U
-            f = work[k].f
-
-            m_tail, Atail, γtail, tmp = tails[k]
-
-            e .= exp.(-t .* ((an ./ 4) .+ Kk^2 .+ (im * (basis.β0/2) * Kk * Pe)))
-            C .= Ak .* reshape(e, 1, :)
-            mul!(Umat, Φe, transpose(C))
-
-            reconstruct!(f, Umat, γ, Atail, γtail, m_tail, tmp, t, Kk)
-
-            # Modal reconstruction may use high precision; FFTW x-inversion is Float64.
-            phase0 = Ccoeffs[k] * cis(Kk * x0)
-            col = @view spectrum[:, k]
-            if _irfft_self_conjugate_mode(k, nx)
-                @inbounds @simd for iy in 1:ny
-                    col[iy] = nx * real(ComplexF64(f[iy] * phase0))
-                end
-            else
-                scale = nx / 2
-                @inbounds @simd for iy in 1:ny
-                    col[iy] = scale * ComplexF64(f[iy] * phase0)
-                end
-            end
-        end
-
-        @views T[it, :, :] .= irfft(spectrum, nx, 2)
+    advance_progress = p === nothing ? nothing : () -> begin
+        processed[] += 1
+        update!(p, processed[])
+        return nothing
     end
 
+    completed=false
+
+    try
+        for (it, t) in enumerate(tvals)
+            fill!(spectrum, 0)
+
+            for k in 1:nk
+                Φe = conj_spectrum ? conj.(basis.Φe[k]) : basis.Φe[k]
+                Ak = conj_spectrum ? conj.(basis.Ak[k]) : basis.Ak[k]
+                an = conj_spectrum ? conj.(basis.an[k]) : basis.an[k]
+                Kk = dom.K[k]
+
+                e = work[k].e
+                C = work[k].C
+                Umat = work[k].U
+                f = work[k].f
+
+                m_tail, Atail, γtail, tmp = tails[k]
+
+                e .= exp.(-t .* ((an ./ 4) .+ Kk^2 .+ (im * (basis.β0/2) * Kk * Pe)))
+                C .= Ak .* reshape(e, 1, :)
+                mul!(Umat, Φe, transpose(C))
+
+                reconstruct!(f, Umat, γ, Atail, γtail, m_tail, tmp, t, Kk)
+
+                # Modal reconstruction may use high precision; FFTW x-inversion is Float64.
+                phase0 = Ccoeffs[k] * cis(Kk * x0)
+                col = @view spectrum[:, k]
+                if _irfft_self_conjugate_mode(k, nx)
+                    @inbounds @simd for iy in 1:ny
+                        col[iy] = nx * real(ComplexF64(f[iy] * phase0))
+                    end
+                else
+                    scale = nx / 2
+                    @inbounds @simd for iy in 1:ny
+                        col[iy] = scale * ComplexF64(f[iy] * phase0)
+                    end
+                end
+            end
+            @views T[it, :, :] .= irfft(spectrum, nx, 2)
+            advance_progress === nothing || advance_progress()
+        end
+        completed = true
+    finally
+        if p !== nothing
+            if completed
+                finish!(p)
+            else
+                cancel(p, "Time evolution aborted")
+            end
+        end
+    end
     return T
 end
-
 
 """
     time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
@@ -238,7 +263,8 @@ end
 
 
 function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
-                              precision_policy=:mixed, qc1=10000, qc2=30000)
+                              precision_policy=:mixed, qc1=10000, qc2=30000,
+                              show_progress::Bool=false)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
@@ -248,8 +274,9 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
                                   Nmax=Nmax,
                                   precision_policy=precision_policy,
                                   qc1=qc1, qc2=qc2,
+                                  show_progress=show_progress,
                                   compute_eigenfunctions=false,
-                                  compute_odd=false)
+                                  compute_odd=false) # this is not true always
 
     work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe;
                                  conj_spectrum=conj_spectrum)
@@ -259,7 +286,8 @@ end
 
 
 function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
-                              precision_policy=:mixed, qc1=10000, qc2=30000)
+                              precision_policy=:mixed, qc1=10000, qc2=30000,
+                              show_progress::Bool=false)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
@@ -269,6 +297,7 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
                                   Nmax=Nmax,
                                   precision_policy=precision_policy,
                                   qc1=qc1, qc2=qc2,
+                                  show_progress=show_progress,
                                   compute_eigenfunctions=false,
                                   compute_odd=false)
 
@@ -280,7 +309,8 @@ end
 
 
 
-function evolve_explicit_avg(dom, prep, Ccoeffs, tvals)
+function evolve_explicit_avg(dom, prep, Ccoeffs, tvals;
+                             show_progress::Bool=false)
     nt = length(tvals)
     nx = length(dom.x)
 
@@ -289,32 +319,59 @@ function evolve_explicit_avg(dom, prep, Ccoeffs, tvals)
 
     x0 = dom.x[1]
 
-    for (it, t) in enumerate(tvals)
-        fill!(spec, 0)
+    # define progressmeter instance
+    p = show_progress && nt > 0 ?
+        Progress(nt; desc="Computing time-evolving solution") :
+        nothing
+    
+    processed = Ref(0)
 
-        for k in eachindex(dom.K)
-            wk = prep.work[k]
+    advance_progress = p === nothing ? nothing : () -> begin
+        processed[] += 1
+        update!(p, processed[])
+        return nothing
+    end
 
-            @. wk.e = exp(-t * wk.λ)
+    completed=false
 
-            # Modal averages may use high precision; 
-            # FFTW reconstruction is intentionally Float64.
-            favg = zero(eltype(wk.e))
-            @inbounds @simd for n in eachindex(wk.e)
-                favg += wk.A0[n] * wk.e[n] * wk.γproj[n]
+    try
+        for (it, t) in enumerate(tvals)
+            fill!(spec, 0)
+
+            for k in eachindex(dom.K)
+                wk = prep.work[k]
+
+                @. wk.e = exp(-t * wk.λ)
+
+                # Modal averages may use high precision; 
+                # FFTW reconstruction is intentionally Float64.
+                favg = zero(eltype(wk.e))
+                @inbounds @simd for n in eachindex(wk.e)
+                    favg += wk.A0[n] * wk.e[n] * wk.γproj[n]
+                end
+
+                # Big/complex arithmetic may happen above; FFTW boundary is here.
+                z = ComplexF64(favg * Ccoeffs[k] * cis(dom.K[k] * x0))
+
+                if _irfft_self_conjugate_mode(k, nx)
+                    spec[k] = nx * real(z)
+                else
+                    spec[k] = (nx / 2) * z
+                end
             end
 
-            # Big/complex arithmetic may happen above; FFTW boundary is here.
-            z = ComplexF64(favg * Ccoeffs[k] * cis(dom.K[k] * x0))
-
-            if _irfft_self_conjugate_mode(k, nx)
-                spec[k] = nx * real(z)
+            T[it, :] .= irfft(spec, nx)
+            advance_progress === nothing || advance_progress()
+        end
+        completed = true
+    finally
+        if p !== nothing
+            if completed
+                finish!(p)
             else
-                spec[k] = (nx / 2) * z
+                cancel(p, "Time evolution aborted")
             end
         end
-
-        T[it, :] .= irfft(spec, nx)
     end
 
     return T

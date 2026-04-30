@@ -240,7 +240,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
         update!(p, processed[])
         return nothing
     end
-    
+
     progress = advance_progress === nothing ? nothing :
         ((_iq, _nq, _q) -> advance_progress(1))
 
