@@ -51,6 +51,9 @@ end
 
 
 function _prepare_mode_work(dom, basis, γ)
+    basis.Φe === nothing &&
+        throw(ArgumentError("basis must include eigenfunctions; call spectral_basis(...; compute_eigenfunctions=true)"))
+
     nk = length(dom.K)
 
     tails  = Vector{Any}(undef, nk)
@@ -95,10 +98,7 @@ end
 function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe; conj_spectrum=false)
     nk = length(dom.K)
 
-    Tmode = promote_type(eltype(Ak[1]), eltype(avals[1]), eltype(float(γ[1])))
-    Tmode = promote_type(eltype(Ak[1]), eltype(avals[1]), eltype(γ))
-
-    work = Vector{AvgModeWork{Tmode}}(undef, nk)
+    work = Vector{AvgModeWork}(undef, nk)
 
     βshift = im * (β0 / 2) * Pe
 
@@ -107,13 +107,16 @@ function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe; conj_spectrum=false)
         ank = conj_spectrum ? conj.(avals[k]) : avals[k]
 
         Nn = length(ank)
+        Kk = dom.K[k]
+        Tmode = promote_type(eltype(Akk), eltype(ank), eltype(γ),
+                             typeof(βshift * Kk), typeof(Kk^2))
+
         A0 = Vector{Tmode}(undef, Nn)
         γproj = Vector{Tmode}(undef, Nn)
         e = Vector{Tmode}(undef, Nn)
         λ = Vector{Tmode}(undef, Nn)
 
         Nγ = min(length(γ), size(Akk, 1))
-        Kk = dom.K[k]
 
         copyto!(A0, vec(Akk[1, :]))
 
@@ -239,10 +242,13 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns)
     Peabs = abs(Pe)
     Nmax = length(γ)
 
-    qs, _, β0, β = flow_decomposition(U, Peabs, dom)
-    _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β; Nmax=Nmax)
+    _, β0, β = flow_decomposition(U, Peabs, dom)
+    data = _collect_spectral_data(dom, Peabs, Ns, β;
+                                  Nmax=Nmax,
+                                  compute_eigenfunctions=false,
+                                  compute_odd=false)
 
-    work = prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe;
+    work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe;
                                  conj_spectrum=conj_spectrum)
 
     return (; β0, work)
@@ -254,10 +260,13 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns)
     Peabs = abs(Pe)
     Nmax = length(γ)
 
-    qs, _, β0, β = flow_decomposition(flow, Peabs, dom)
-    _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β; Nmax=Nmax)
+    _, β0, β = flow_decomposition(flow, Peabs, dom)
+    data = _collect_spectral_data(dom, Peabs, Ns, β;
+                                  Nmax=Nmax,
+                                  compute_eigenfunctions=false,
+                                  compute_odd=false)
 
-    work = prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe;
+    work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe;
                                  conj_spectrum=conj_spectrum)
 
     return (; β0, work)
