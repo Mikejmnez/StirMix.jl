@@ -237,7 +237,8 @@ function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
 end
 
 
-function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns)
+function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
+                              precision_policy=:mixed, qc1=10000, qc2=30000)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
@@ -245,6 +246,8 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns)
     _, β0, β = flow_decomposition(U, Peabs, dom)
     data = _collect_spectral_data(dom, Peabs, Ns, β;
                                   Nmax=Nmax,
+                                  precision_policy=precision_policy,
+                                  qc1=qc1, qc2=qc2,
                                   compute_eigenfunctions=false,
                                   compute_odd=false)
 
@@ -255,7 +258,8 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns)
 end
 
 
-function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns)
+function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
+                              precision_policy=:mixed, qc1=10000, qc2=30000)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
@@ -263,6 +267,8 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns)
     _, β0, β = flow_decomposition(flow, Peabs, dom)
     data = _collect_spectral_data(dom, Peabs, Ns, β;
                                   Nmax=Nmax,
+                                  precision_policy=precision_policy,
+                                  qc1=qc1, qc2=qc2,
                                   compute_eigenfunctions=false,
                                   compute_odd=false)
 

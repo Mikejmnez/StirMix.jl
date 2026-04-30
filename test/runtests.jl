@@ -12,7 +12,7 @@ using Test
         @test all(x -> x !== nothing, basis.Φe)
         @test all(x -> x !== nothing, basis.Φo)
 
-        mixed_basis = spectral_basis(:cos, 1000.0, dom, 10;
+        mixed_basis = spectral_basis(:cos, 10000.0, dom, 10;
                                      compute_eigenfunctions=false)
         @test mixed_basis.Φe === nothing
         @test mixed_basis.Φo === nothing
@@ -30,7 +30,7 @@ using Test
         field = solve_explicit(dom, basis, gamma, ccoeffs, [0.1], 1.0)
         @test size(field) == (1, length(dom.y), length(dom.x))
 
-        prep = prepare_explicit_avg(dom, :cos, gamma, 1000.0, 10)
+        prep = prepare_explicit_avg(dom, :cos, gamma, 10000.0, 10)
         avg_field = evolve_explicit_avg(dom, prep, ccoeffs, [0.1])
 
         @test prep.β0 == 1.0

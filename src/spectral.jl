@@ -95,21 +95,37 @@ function cosine_tail_data(y::AbstractVector, γ::AbstractVector, Nn::Integer)
 end
 
 
-function _q_values(K::AbstractVector, Pe::Real; big_threshold::Real=1000)
+function _q_values(K::AbstractVector, Pe::Real; 
+                  precision_policy=:mixed, qc1::Real=10000, qc2::Real=30000)
     absq = abs.(2 .* K .* Pe)
-    use_big = absq .> big_threshold
+    if precision_policy === :mixed
+        qc1 < qc2 || throw(ArgumentError("qc1 must be less than qc2; got qc1=$qc1, qc2=$qc2"))
+        idx64  = findall(absq .< qc1)
+        idxbig     = findall((absq .>= qc1) .& (absq .< qc2))
+        idxHR = findall(absq .>= qc2)
 
-    idxbig = findall(use_big)
-    idx64 = findall(.!use_big)
+        qs64 = ComplexF64.(complex.(0.0, 2 .* K[idx64] .* Pe))
 
-    qs64 = ComplexF64.(complex.(0.0, 2 .* K[idx64] .* Pe))
+        qsbig = complex.(
+            zero(BigFloat),
+            big(2) .* BigFloat.(K[idxbig]) .* BigFloat(Pe),
+        )
+        qsHR = ComplexF64.(complex.(0.0, 2 .* K[idxHR] .* Pe))
 
-    qsbig = complex.(
-        zero(BigFloat),
-        big(2) .* BigFloat.(K[idxbig]) .* BigFloat(Pe),
-    )
+        return (; idx64, idxbig, idxHR, qs64, qsbig, qsHR)
 
-    return (; idx64, idxbig, qs64, qsbig)
+    elseif precision_policy === :float64
+
+        idx64 = collect(eachindex(K))
+        qs64 = ComplexF64.(complex.(0.0, 2 .* K .* Pe))
+
+    else
+        throw(ArgumentError(
+            "precision_policy must be one of (:mixed, :float64); got $(repr(precision_policy))"
+        ))
+    end
+
+    return (; idx64, idxbig=Int[], idxHR=Int[], qs64, qsbig=Complex{BigFloat}[], qsHR=ComplexF64[])
 end
 
 
@@ -181,6 +197,8 @@ end
 
 function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
                                 Nmax=nothing,
+                                precision_policy=:mixed,
+                                qc1=10000, qc2=30000,
                                 compute_eigenfunctions::Bool=true,
                                 compute_odd::Bool=true)
     nk = length(domain.K)
@@ -194,7 +212,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
     Bk = compute_odd ? Vector{Any}(undef, nk) : nothing
     Φo = (compute_odd && compute_eigenfunctions) ? Vector{Any}(undef, nk) : nothing
 
-    qdata = _q_values(domain.K, Pe)
+    qdata = _q_values(domain.K, Pe; precision_policy=precision_policy, qc1=qc1, qc2=qc2)
 
     _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
                              qdata.idx64, qdata.qs64, domain, Ns, β;
@@ -204,6 +222,12 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
 
     _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
                              qdata.idxbig, qdata.qsbig, domain, Ns, β;
+                             Nmax=Nmax,
+                             compute_eigenfunctions=compute_eigenfunctions,
+                             compute_odd=compute_odd)
+
+    _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
+                             qdata.idxHR, qdata.qsHR, domain, Ns, β;
                              Nmax=Nmax,
                              compute_eigenfunctions=compute_eigenfunctions,
                              compute_odd=compute_odd)
@@ -219,9 +243,11 @@ If `compute_eigenfunctions=false`, the eigenvector/eigenvalue data are still
 returned but `Φe` and `Φo` are set to `nothing`.
 """
 function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
+                        precision_policy=:mixed, qc1=10000, qc2=30000,
                         compute_eigenfunctions::Bool=true)
     _, β0, β = flow_decomposition(U, Pe, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
+                                  precision_policy=precision_policy, qc1=qc1, qc2=qc2,
                                   compute_eigenfunctions=compute_eigenfunctions)
 
     return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk,
@@ -236,9 +262,11 @@ If `compute_eigenfunctions=false`, the eigenvector/eigenvalue data are still
 returned but `Φe` and `Φo` are set to `nothing`.
 """
 function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns;
+                        precision_policy=:mixed, qc1=10000, qc2=30000,
                         compute_eigenfunctions::Bool=true)
     _, β0, β = flow_decomposition(flow, Pe, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
+                                  precision_policy=precision_policy, qc1=qc1, qc2=qc2, 
                                   compute_eigenfunctions=compute_eigenfunctions)
 
     return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk,
