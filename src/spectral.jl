@@ -94,67 +94,153 @@ function cosine_tail_data(y::AbstractVector, γ::AbstractVector, Nn::Integer)
     return m_tail, Btail, γtail, tmp
 end
 
+
+function _q_values(K::AbstractVector, Pe::Real; big_threshold::Real=1000)
+    absq = abs.(2 .* K .* Pe)
+    use_big = absq .> big_threshold
+
+    idxbig = findall(use_big)
+    idx64 = findall(.!use_big)
+
+    qs64 = ComplexF64.(complex.(0.0, 2 .* K[idx64] .* Pe))
+
+    qsbig = complex.(
+        zero(BigFloat),
+        big(2) .* BigFloat.(K[idxbig]) .* BigFloat(Pe),
+    )
+
+    return (; idx64, idxbig, qs64, qsbig)
+end
+
+
 """
-Takes a shear flow returns the canonical parameters
-q = 2ikPe and the even Fourier coefficients that describe the flow β_0, β_e, 
-that are used to 
+Takes a shear flow and returns its sampled values plus the even Fourier
+coefficients β_0 and β_e.
 """
 function flow_decomposition(U::AbstractVector, Pe, domain::Domain)
     y = domain.y
     Lx = domain.Ny
     K = domain.K
-    qs = Complex{Float64}.(im .* big.(2*K*Pe)) # <--- make complex bigfloat?
     β0, β, _ = normal_mode_decomposition(U, y; Lx)
 
     # TODO
     # If flow not even, compute its even periodic extension and 
     # halve the domain (i.e. focus on a single half).
 
-    return qs, U, β0, β
+    return U, β0, β
 end
 
-"""
 
-"""
 function flow_decomposition(flow::Symbol, Pe, domain::Domain)
     K = domain.K
-    qs = Complex{Float64}.(im .* big.(2*K*Pe)) # <--- make complex bigfloat?
 
     U, β0, β = predefined_flow(flow, domain; Nmodes=length(K))
 
-    return qs, U, β0, β
+    return U, β0, β
+end
+
+
+function _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
+                                  idx, qbatch, domain, Ns, β;
+                                  Nmax=nothing,
+                                  compute_eigenfunctions::Bool=true,
+                                  compute_odd::Bool=true)
+    isempty(idx) && return nothing
+
+    qvec, avals, Ak_batch = collect_sweep_eigen(Even, qbatch, Ns, β; Nmax=Nmax)
+    Φe_batch = compute_eigenfunctions ? sweep_even_eigenfunctions(Ak_batch, domain.y) : nothing
+
+    bvals = Bk_batch = Φo_batch = nothing
+    if compute_odd
+        _, bvals, Bk_batch = collect_sweep_eigen(Odd, qbatch, Ns, β; Nmax=Nmax)
+        Φo_batch = compute_eigenfunctions ? sweep_odd_eigenfunctions(Bk_batch, domain.y) : nothing
+    end
+
+    for (j, k) in pairs(idx)
+        qs[k] = qvec[j]
+        an[k] = avals[j]
+        Ak[k] = Ak_batch[j]
+
+        if compute_eigenfunctions
+            Φe[k] = Φe_batch[j]
+        end
+
+        if compute_odd
+            bn[k] = bvals[j]
+            Bk[k] = Bk_batch[j]
+
+            if compute_eigenfunctions
+                Φo[k] = Φo_batch[j]
+            end
+        end
+    end
+
+    return nothing
+end
+
+
+function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
+                                Nmax=nothing,
+                                compute_eigenfunctions::Bool=true,
+                                compute_odd::Bool=true)
+    nk = length(domain.K)
+    qs = Vector{Union{ComplexF64, Complex{BigFloat}}}(undef, nk)
+
+    an = Vector{Any}(undef, nk)
+    Ak = Vector{Any}(undef, nk)
+    Φe = compute_eigenfunctions ? Vector{Any}(undef, nk) : nothing
+
+    bn = compute_odd ? Vector{Any}(undef, nk) : nothing
+    Bk = compute_odd ? Vector{Any}(undef, nk) : nothing
+    Φo = (compute_odd && compute_eigenfunctions) ? Vector{Any}(undef, nk) : nothing
+
+    qdata = _q_values(domain.K, Pe)
+
+    _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
+                             qdata.idx64, qdata.qs64, domain, Ns, β;
+                             Nmax=Nmax,
+                             compute_eigenfunctions=compute_eigenfunctions,
+                             compute_odd=compute_odd)
+
+    _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
+                             qdata.idxbig, qdata.qsbig, domain, Ns, β;
+                             Nmax=Nmax,
+                             compute_eigenfunctions=compute_eigenfunctions,
+                             compute_odd=compute_odd)
+
+    return (; qs, an, bn, Ak, Bk, Φe, Φo)
 end
 
 
 """
-collects all eigenpairs including eigenfunction sweeps for the entire range of
-    alongstream wavenumber space.
+Collect eigenpairs for the alongstream wavenumber sweep.
+
+If `compute_eigenfunctions=false`, the eigenvector/eigenvalue data are still
+returned but `Φe` and `Φo` are set to `nothing`.
 """
-function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns)
-    qs, _, β0, β = flow_decomposition(U, Pe, domain)
+function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
+                        compute_eigenfunctions::Bool=true)
+    _, β0, β = flow_decomposition(U, Pe, domain)
+    data = _collect_spectral_data(domain, Pe, Ns, β;
+                                  compute_eigenfunctions=compute_eigenfunctions)
 
-    _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β)
-    Φe = sweep_even_eigenfunctions(Ak, domain.y)
-
-    _, bvals, Bk = collect_sweep_eigen(Odd, qs, Ns, β)
-    Φo = sweep_odd_eigenfunctions(Bk, domain.y)
-
-    return SpectralBasis(qs, β0, β, avals, bvals, Ak, Bk, Φe, Φo)
+    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk,
+                         data.Φe, data.Φo)
 end
 
 
 """
-collects all eigenpairs including eigenfunction sweeps for the entire range of
-    alongstream wavenumber space.
+Collect eigenpairs for a predefined flow over the alongstream wavenumber sweep.
+
+If `compute_eigenfunctions=false`, the eigenvector/eigenvalue data are still
+returned but `Φe` and `Φo` are set to `nothing`.
 """
-function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns)
-    qs, _, β0, β = flow_decomposition(flow, Pe, domain)
+function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns;
+                        compute_eigenfunctions::Bool=true)
+    _, β0, β = flow_decomposition(flow, Pe, domain)
+    data = _collect_spectral_data(domain, Pe, Ns, β;
+                                  compute_eigenfunctions=compute_eigenfunctions)
 
-    _, avals, Ak = collect_sweep_eigen(Even, qs, Ns, β)
-    Φe = sweep_even_eigenfunctions(Ak, domain.y)
-
-    _, bvals, Bk = collect_sweep_eigen(Odd, qs, Ns, β)
-    Φo = sweep_odd_eigenfunctions(Bk, domain.y)
-
-    return SpectralBasis(qs, β0, β, avals, bvals, Ak, Bk, Φe, Φo)
+    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk,
+                         data.Φe, data.Φo)
 end
