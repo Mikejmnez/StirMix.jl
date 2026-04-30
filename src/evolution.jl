@@ -243,7 +243,7 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
     Peabs = abs(Pe)
     Nmax = length(γ)
 
-    _, β0, β = flow_decomposition(U, Peabs, dom)
+    _, β0, β = flow_decomposition(U, dom)
     data = _collect_spectral_data(dom, Peabs, Ns, β;
                                   Nmax=Nmax,
                                   precision_policy=precision_policy,
@@ -264,7 +264,7 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
     Peabs = abs(Pe)
     Nmax = length(γ)
 
-    _, β0, β = flow_decomposition(flow, Peabs, dom)
+    _, β0, β = flow_decomposition(flow, dom)
     data = _collect_spectral_data(dom, Peabs, Ns, β;
                                   Nmax=Nmax,
                                   precision_policy=precision_policy,

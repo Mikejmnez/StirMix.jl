@@ -133,10 +133,9 @@ end
 Takes a shear flow and returns its sampled values plus the even Fourier
 coefficients β_0 and β_e.
 """
-function flow_decomposition(U::AbstractVector, Pe, domain::Domain)
+function flow_decomposition(U::AbstractVector, domain::Domain)
     y = domain.y
     Lx = domain.Ny
-    K = domain.K
     β0, β, _ = normal_mode_decomposition(U, y; Lx)
 
     # TODO
@@ -147,10 +146,9 @@ function flow_decomposition(U::AbstractVector, Pe, domain::Domain)
 end
 
 
-function flow_decomposition(flow::Symbol, Pe, domain::Domain)
-    K = domain.K
+function flow_decomposition(flow::Symbol, domain::Domain)
 
-    U, β0, β = predefined_flow(flow, domain; Nmodes=length(K))
+    U, β0, β = predefined_flow(flow, domain; Nmodes=length(domain.K))
 
     return U, β0, β
 end
@@ -245,7 +243,7 @@ returned but `Φe` and `Φo` are set to `nothing`.
 function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
                         precision_policy=:mixed, qc1=10000, qc2=30000,
                         compute_eigenfunctions::Bool=true)
-    _, β0, β = flow_decomposition(U, Pe, domain)
+    _, β0, β = flow_decomposition(U, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
                                   precision_policy=precision_policy, qc1=qc1, qc2=qc2,
                                   compute_eigenfunctions=compute_eigenfunctions)
@@ -264,7 +262,7 @@ returned but `Φe` and `Φo` are set to `nothing`.
 function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns;
                         precision_policy=:mixed, qc1=10000, qc2=30000,
                         compute_eigenfunctions::Bool=true)
-    _, β0, β = flow_decomposition(flow, Pe, domain)
+    _, β0, β = flow_decomposition(flow, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
                                   precision_policy=precision_policy, qc1=qc1, qc2=qc2, 
                                   compute_eigenfunctions=compute_eigenfunctions)
