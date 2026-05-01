@@ -71,6 +71,59 @@ end
         @test any(q -> q isa Complex{BigFloat}, mixed_progress_basis.qs)
     end
 
+    @testset "spectral basis parallel chunks and progress" begin
+        serial_basis, serial_output = capture_stderr() do
+            spectral_basis(:cos, 1.0, dom, 10;
+                           precision_policy=:float64,
+                           parallel=false,
+                           show_progress=true,
+                           sweep_chunk_size=Int32(2))
+        end
+        parallel_basis, parallel_output = capture_stderr() do
+            spectral_basis(:cos, 1.0, dom, 10;
+                           precision_policy=:float64,
+                           parallel=true,
+                           show_progress=true,
+                           sweep_chunk_size=2)
+        end
+
+        @test serial_basis.qs == parallel_basis.qs
+        @test all(k -> serial_basis.an[k] == parallel_basis.an[k], eachindex(dom.K))
+        @test all(k -> serial_basis.Ak[k] == parallel_basis.Ak[k], eachindex(dom.K))
+        @test all(k -> serial_basis.bn[k] == parallel_basis.bn[k], eachindex(dom.K))
+        @test all(k -> serial_basis.Bk[k] == parallel_basis.Bk[k], eachindex(dom.K))
+        @test all(k -> serial_basis.Φe[k] == parallel_basis.Φe[k], eachindex(dom.K))
+        @test all(k -> serial_basis.Φo[k] == parallel_basis.Φo[k], eachindex(dom.K))
+        @test isempty(serial_output) || occursin("Computing spectral basis", serial_output)
+        @test isempty(parallel_output) || occursin("Computing spectral basis", parallel_output)
+        @test !occursin("aborted", lowercase(serial_output))
+        @test !occursin("aborted", lowercase(parallel_output))
+
+        mixed_serial = spectral_basis(:cos, 10000.0, dom, 10;
+                                      precision_policy=:mixed,
+                                      compute_eigenfunctions=false,
+                                      parallel=false,
+                                      sweep_chunk_size=2)
+        mixed_parallel = spectral_basis(:cos, 10000.0, dom, 10;
+                                        precision_policy=:mixed,
+                                        compute_eigenfunctions=false,
+                                        parallel=true,
+                                        sweep_chunk_size=2)
+
+        @test mixed_serial.qs == mixed_parallel.qs
+        @test any(q -> q isa Complex{BigFloat}, mixed_parallel.qs)
+        @test mixed_parallel.Φe === nothing
+        @test mixed_parallel.Φo === nothing
+        @test all(k -> mixed_serial.an[k] == mixed_parallel.an[k], eachindex(dom.K))
+        @test all(k -> mixed_serial.Ak[k] == mixed_parallel.Ak[k], eachindex(dom.K))
+        @test all(k -> mixed_serial.bn[k] == mixed_parallel.bn[k], eachindex(dom.K))
+        @test all(k -> mixed_serial.Bk[k] == mixed_parallel.Bk[k], eachindex(dom.K))
+
+        @test_throws ArgumentError spectral_basis(:cos, 1.0, dom, 10;
+                                                  precision_policy=:float64,
+                                                  sweep_chunk_size=0)
+    end
+
     @testset "averaged preparation reuses mixed spectral data" begin
         gamma = ones(5)
         ccoeffs = ones(ComplexF64, length(dom.K))
@@ -104,6 +157,37 @@ end
         @test size(avg_field) == (1, length(dom.x))
         @test length(symbol_progress_prep.work) == length(dom.K)
         @test length(vector_progress_prep.work) == length(dom.K)
+    end
+
+    @testset "averaged preparation parallel chunks" begin
+        gamma = ones(5)
+        U, _, _ = predefined_flow(:cos, dom)
+
+        serial_prep, serial_output = capture_stderr() do
+            prepare_explicit_avg(dom, U, gamma, 1.0, 10;
+                                 precision_policy=:float64,
+                                 parallel=false,
+                                 show_progress=true,
+                                 sweep_chunk_size=Int32(2))
+        end
+        parallel_prep, parallel_output = capture_stderr() do
+            prepare_explicit_avg(dom, :cos, gamma, 1.0, 10;
+                                 precision_policy=:float64,
+                                 parallel=true,
+                                 show_progress=true,
+                                 sweep_chunk_size=2)
+        end
+
+        @test length(serial_prep.work) == length(dom.K)
+        @test length(parallel_prep.work) == length(dom.K)
+        @test serial_prep.β0 == parallel_prep.β0
+        @test all(k -> serial_prep.work[k].A0 == parallel_prep.work[k].A0, eachindex(dom.K))
+        @test all(k -> serial_prep.work[k].λ == parallel_prep.work[k].λ, eachindex(dom.K))
+        @test all(k -> serial_prep.work[k].γproj == parallel_prep.work[k].γproj, eachindex(dom.K))
+        @test isempty(serial_output) || occursin("Computing spectral basis", serial_output)
+        @test isempty(parallel_output) || occursin("Computing spectral basis", parallel_output)
+        @test !occursin("aborted", lowercase(serial_output))
+        @test !occursin("aborted", lowercase(parallel_output))
     end
 
     @testset "explicit evolution progress" begin
