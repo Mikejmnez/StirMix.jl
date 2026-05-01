@@ -154,45 +154,29 @@ function flow_decomposition(flow::Symbol, domain::Domain)
 end
 
 
-function _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
-                                  idx, qbatch, domain, Ns, β;
+function _scatter_spectral_point!(qs, an, bn, Ak, Bk, Φe, Φo,
+                                  k, q, domain, Ns, β;
                                   Nmax=nothing,
                                   compute_eigenfunctions::Bool=true,
-                                  progress=nothing,
-                                  advance_progress=nothing,
                                   compute_odd::Bool=true)
-    isempty(idx) && return nothing
+    λe, Ve = adaptive_eigen(Even, q, Ns, β; Nmax=Nmax)
 
-    nbatch = length(qbatch)
+    qs[k] = q
+    an[k] = λe
+    Ak[k] = Ve
 
-    qvec, avals, Ak_batch = collect_sweep_eigen(Even, qbatch, Ns, β; Nmax=Nmax, progress=progress)
-    Φe_batch = compute_eigenfunctions ? sweep_even_eigenfunctions(Ak_batch, domain.y) : nothing
-    compute_eigenfunctions && advance_progress !== nothing && advance_progress(nbatch)
-
-
-    bvals = Bk_batch = Φo_batch = nothing
-    if compute_odd
-        _, bvals, Bk_batch = collect_sweep_eigen(Odd, qbatch, Ns, β; Nmax=Nmax, progress=progress)
-        Φo_batch = compute_eigenfunctions ? sweep_odd_eigenfunctions(Bk_batch, domain.y) : nothing
-        compute_eigenfunctions && advance_progress !== nothing && advance_progress(nbatch)
+    if compute_eigenfunctions
+        Φe[k] = even_eigenfunctions(Ve, domain.y)
     end
 
-    for (j, k) in pairs(idx)
-        qs[k] = qvec[j]
-        an[k] = avals[j]
-        Ak[k] = Ak_batch[j]
+    if compute_odd
+        λo, Vo = adaptive_eigen(Odd, q, Ns, β; Nmax=Nmax)
+
+        bn[k] = λo
+        Bk[k] = Vo
 
         if compute_eigenfunctions
-            Φe[k] = Φe_batch[j]
-        end
-
-        if compute_odd
-            bn[k] = bvals[j]
-            Bk[k] = Bk_batch[j]
-
-            if compute_eigenfunctions
-                Φo[k] = Φo_batch[j]
-            end
+            Φo[k] = odd_eigenfunctions(Vo, domain.y)
         end
     end
 
@@ -200,10 +184,62 @@ function _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
 end
 
 
+function _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
+                                  idx, qbatch, domain, Ns, β;
+                                  Nmax=nothing,
+                                  compute_eigenfunctions::Bool=true,
+                                  advance_progress=nothing,
+                                  compute_odd::Bool=true,
+                                  parallel::Bool=false)
+    isempty(idx) && return nothing
+
+    units_per_q = (1 + Int(compute_odd)) * (1 + Int(compute_eigenfunctions))
+
+    if parallel && Threads.nthreads() > 1 && length(qbatch) > 1
+        Threads.@threads :dynamic for j in 1:length(qbatch)
+            k = idx[j]
+            q = qbatch[j]
+
+            _scatter_spectral_point!(qs, an, bn, Ak, Bk, Φe, Φo,
+                                     k, q, domain, Ns, β;
+                                     Nmax=Nmax,
+                                     compute_eigenfunctions=compute_eigenfunctions,
+                                     compute_odd=compute_odd)
+
+            advance_progress === nothing || advance_progress(units_per_q)
+        end
+    else
+        for j in 1:length(qbatch)
+            k = idx[j]
+            q = qbatch[j]
+
+            _scatter_spectral_point!(qs, an, bn, Ak, Bk, Φe, Φo,
+                                     k, q, domain, Ns, β;
+                                     Nmax=Nmax,
+                                     compute_eigenfunctions=compute_eigenfunctions,
+                                     compute_odd=compute_odd)
+
+            advance_progress === nothing || advance_progress(units_per_q)
+        end
+    end
+
+    return nothing
+end
+
+
+function _normalize_sweep_chunk_size(sweep_chunk_size::Union{Nothing,Integer})
+    sweep_chunk_size === nothing && return nothing
+    sweep_chunk_size > 0 ||
+        throw(ArgumentError("sweep_chunk_size must be positive"))
+    return Int(sweep_chunk_size)
+end
+
+
 function _scatter_spectral_group!(qs, an, bn, Ak, Bk, Φe, Φo,
                                   idx::AbstractVector, qvals::AbstractVector,
                                   domain, Ns, β;
-                                  sweep_chunk_size::Union{Nothing,Integer}=nothing,
+                                  sweep_chunk_size::Union{Nothing,Int}=nothing,
+                                  parallel::Bool=false,
                                   kwargs...)
     isempty(idx) && return nothing
     length(idx) == length(qvals) ||
@@ -212,12 +248,10 @@ function _scatter_spectral_group!(qs, an, bn, Ak, Bk, Φe, Φo,
     if sweep_chunk_size === nothing
         _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
                                  idx, qvals, domain, Ns, β;
+                                 parallel=parallel,
                                  kwargs...)
         return nothing
     end
-
-    sweep_chunk_size > 0 ||
-        throw(ArgumentError("sweep_chunk_size must be positive"))
 
     n = length(idx)
     for first in 1:sweep_chunk_size:n
@@ -228,6 +262,7 @@ function _scatter_spectral_group!(qs, an, bn, Ak, Bk, Φe, Φo,
 
         _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
                                  idx_chunk, q_chunk, domain, Ns, β;
+                                 parallel=parallel,
                                  kwargs...)
     end
 
@@ -238,11 +273,14 @@ end
 function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
                                 Nmax=nothing,
                                 precision_policy=:mixed,
+                                parallel::Bool=false,
                                 show_progress::Bool=false,
                                 qc1=10000, qc2=30000,
                                 compute_eigenfunctions::Bool=true,
                                 compute_odd::Bool=true, 
-                                sweep_chunk_size::Union{Nothing,Int}=nothing)
+                                sweep_chunk_size::Union{Nothing,Integer}=nothing)
+    sweep_chunk_size = _normalize_sweep_chunk_size(sweep_chunk_size)
+
     nk = length(domain.K)
     qs = Vector{Union{ComplexF64, Complex{BigFloat}}}(undef, nk)
 
@@ -270,15 +308,18 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
         nothing
 
     processed = Ref(0)
+    progress_lock = ReentrantLock()
 
     advance_progress = p === nothing ? nothing : n -> begin
-        processed[] += n
-        update!(p, processed[])
+        lock(progress_lock)
+        try
+            processed[] += n
+            update!(p, processed[])
+        finally
+            unlock(progress_lock)
+        end
         return nothing
     end
-
-    progress = advance_progress === nothing ? nothing :
-        ((_iq, _nq, _q) -> advance_progress(1))
 
     completed = false
 
@@ -288,7 +329,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
                                  qdata.idx64, qdata.qs64, domain, Ns, β;
                                  Nmax=Nmax,
                                  compute_eigenfunctions=compute_eigenfunctions,
-                                 progress=progress,
+                                 parallel=parallel,
                                  advance_progress=advance_progress,
                                  compute_odd=compute_odd,
                                  sweep_chunk_size=sweep_chunk_size)
@@ -297,7 +338,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
                                  qdata.idxbig, qdata.qsbig, domain, Ns, β;
                                  Nmax=Nmax,
                                  compute_eigenfunctions=compute_eigenfunctions,
-                                 progress=progress,
+                                 parallel=parallel,
                                  advance_progress=advance_progress,
                                  compute_odd=compute_odd,
                                  sweep_chunk_size=sweep_chunk_size)
@@ -305,8 +346,8 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
         _scatter_spectral_group!(qs, an, bn, Ak, Bk, Φe, Φo,
                                  qdata.idxHR, qdata.qsHR, domain, Ns, β;
                                  Nmax=Nmax,
-                                 progress=progress,
                                  advance_progress=advance_progress,
+                                 parallel=parallel,
                                  compute_eigenfunctions=compute_eigenfunctions,
                                  compute_odd=compute_odd,
                                  sweep_chunk_size=sweep_chunk_size)
@@ -334,11 +375,13 @@ returned but `Φe` and `Φo` are set to `nothing`.
 function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
                         precision_policy=:mixed, qc1=10000, qc2=30000,
                         compute_eigenfunctions::Bool=true,
+                        parallel::Bool = false,
                         show_progress::Bool=false, 
-                        sweep_chunk_size::Union{Nothing,Int}=nothing)
+                        sweep_chunk_size::Union{Nothing,Integer}=nothing)
     _, β0, β = flow_decomposition(U, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
                                   precision_policy=precision_policy, qc1=qc1, qc2=qc2,
+                                  parallel=parallel,
                                   show_progress=show_progress,
                                   compute_eigenfunctions=compute_eigenfunctions, 
                                   sweep_chunk_size=sweep_chunk_size)
@@ -357,11 +400,13 @@ returned but `Φe` and `Φo` are set to `nothing`.
 function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns;
                         precision_policy=:mixed, qc1=10000, qc2=30000,
                         compute_eigenfunctions::Bool=true,
+                        parallel::Bool=false,
                         show_progress::Bool=false, 
-                        sweep_chunk_size::Union{Nothing,Int}=nothing)
+                        sweep_chunk_size::Union{Nothing,Integer}=nothing)
     _, β0, β = flow_decomposition(flow, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
                                   precision_policy=precision_policy, qc1=qc1, qc2=qc2, 
+                                  parallel=parallel,
                                   show_progress=show_progress,
                                   compute_eigenfunctions=compute_eigenfunctions, 
                                   sweep_chunk_size=sweep_chunk_size)

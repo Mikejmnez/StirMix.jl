@@ -264,8 +264,9 @@ end
 
 function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
                               precision_policy=:mixed, qc1=10000, qc2=30000,
+                              parallel::Bool=false,
                               show_progress::Bool=false, 
-                              sweep_chunk_size::Union{Nothing,Int}=nothing)
+                              sweep_chunk_size::Union{Nothing,Integer}=nothing)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
@@ -275,6 +276,7 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
                                   Nmax=Nmax,
                                   precision_policy=precision_policy,
                                   qc1=qc1, qc2=qc2,
+                                  parallel=parallel,
                                   show_progress=show_progress,
                                   compute_eigenfunctions=false,
                                   compute_odd=false, 
@@ -289,8 +291,9 @@ end
 
 function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
                               precision_policy=:mixed, qc1=10000, qc2=30000,
+                              parallel::Bool=false,
                               show_progress::Bool=false, 
-                              sweep_chunk_size::Union{Nothing,Int}=nothing)
+                              sweep_chunk_size::Union{Nothing,Integer}=nothing)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
@@ -300,6 +303,7 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
                                   Nmax=Nmax,
                                   precision_policy=precision_policy,
                                   qc1=qc1, qc2=qc2,
+                                  parallel=parallel,
                                   show_progress=show_progress,
                                   compute_eigenfunctions=false,
                                   compute_odd=false, 
