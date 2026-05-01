@@ -264,7 +264,8 @@ end
 
 function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
                               precision_policy=:mixed, qc1=10000, qc2=30000,
-                              show_progress::Bool=false)
+                              show_progress::Bool=false, 
+                              sweep_chunk_size::Union{Nothing,Int}=nothing)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
@@ -276,7 +277,8 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
                                   qc1=qc1, qc2=qc2,
                                   show_progress=show_progress,
                                   compute_eigenfunctions=false,
-                                  compute_odd=false) # this is not true always
+                                  compute_odd=false, 
+                                  sweep_chunk_size=sweep_chunk_size) # this is not true always
 
     work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe;
                                  conj_spectrum=conj_spectrum)
@@ -287,7 +289,8 @@ end
 
 function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
                               precision_policy=:mixed, qc1=10000, qc2=30000,
-                              show_progress::Bool=false)
+                              show_progress::Bool=false, 
+                              sweep_chunk_size::Union{Nothing,Int}=nothing)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
@@ -299,7 +302,8 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
                                   qc1=qc1, qc2=qc2,
                                   show_progress=show_progress,
                                   compute_eigenfunctions=false,
-                                  compute_odd=false)
+                                  compute_odd=false, 
+                                  sweep_chunk_size=sweep_chunk_size)
 
     work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe;
                                  conj_spectrum=conj_spectrum)
