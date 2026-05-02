@@ -198,6 +198,8 @@ end
 
         basis = spectral_basis(:cos, 1.0, dom, 10; precision_policy=:float64)
         field = solve_explicit(dom, basis, gamma, ccoeffs, tvals, 1.0)
+        parallel_field = solve_explicit(dom, basis, gamma, ccoeffs, tvals, 1.0;
+                                        parallel=true)
 
         no_progress_field, no_progress_output = capture_stderr() do
             solve_explicit(dom, basis, gamma, ccoeffs, progress_tvals, 1.0;
@@ -211,6 +213,8 @@ end
         prep = prepare_explicit_avg(dom, :cos, gamma, 1.0, 10;
                                     precision_policy=:float64)
         avg_field = evolve_explicit_avg(dom, prep, ccoeffs, tvals)
+        parallel_avg = evolve_explicit_avg(dom, prep, ccoeffs, tvals;
+                                           parallel=true)
 
         no_progress_avg, no_progress_avg_output = capture_stderr() do
             evolve_explicit_avg(dom, prep, ccoeffs, progress_tvals;
@@ -223,12 +227,14 @@ end
 
         @test no_progress_field == field
         @test progress_field == field
+        @test parallel_field ≈ field
         @test isempty(no_progress_output)
         @test occursin("Computing time-evolving solution", progress_output)
         @test !occursin("aborted", lowercase(progress_output))
 
         @test no_progress_avg == avg_field
         @test progress_avg == avg_field
+        @test parallel_avg ≈ avg_field
         @test isempty(no_progress_avg_output)
         @test occursin("Computing time-evolving solution", progress_avg_output)
         @test !occursin("aborted", lowercase(progress_avg_output))
