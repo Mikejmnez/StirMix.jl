@@ -96,7 +96,9 @@ end
 
 
 function _q_values(K::AbstractVector, Pe::Real; 
-                  precision_policy=:mixed, qc1::Real=10000, qc2::Real=30000)
+                  precision_policy=:mixed, 
+                  qc1::Union{Nothing,Real}=nothing, 
+                  qc2::Union{Nothing,Real}=nothing)
     absq = abs.(2 .* K .* Pe)
     if precision_policy === :mixed
         qc1 < qc2 || throw(ArgumentError("qc1 must be less than qc2; got qc1=$qc1, qc2=$qc2"))
@@ -272,10 +274,11 @@ end
 
 function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
                                 Nmax=nothing,
-                                precision_policy=:mixed,
-                                parallel::Bool=false,
-                                show_progress::Bool=false,
-                                qc1=10000, qc2=30000,
+                                precision_policy=:float64,
+                                parallel::Bool=true,
+                                show_progress::Bool=true,
+                                qc1::Union{Nothing,Real}=nothing, 
+                                qc2::Union{Nothing,Real}=nothing,
                                 compute_eigenfunctions::Bool=true,
                                 compute_odd::Bool=true, 
                                 sweep_chunk_size::Union{Nothing,Integer}=nothing)
@@ -373,11 +376,12 @@ If `compute_eigenfunctions=false`, the eigenvector/eigenvalue data are still
 returned but `Φe` and `Φo` are set to `nothing`.
 """
 function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
-                        precision_policy=:mixed, qc1=10000, qc2=30000,
-                        compute_eigenfunctions::Bool=true,
-                        compute_odd::Bool=true,
-                        parallel::Bool = false,
-                        show_progress::Bool=false, 
+                        precision_policy=:float64, qc1::Union{Nothing,Real}=nothing, 
+                        qc2::Union{Nothing,Real}=nothing,
+                        compute_eigenfunctions::Bool=false,
+                        compute_odd::Bool=false,
+                        parallel::Bool = true,
+                        show_progress::Bool=true, 
                         sweep_chunk_size::Union{Nothing,Integer}=nothing)
     _, β0, β = flow_decomposition(U, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
@@ -400,11 +404,12 @@ If `compute_eigenfunctions=false`, the eigenvector/eigenvalue data are still
 returned but `Φe` and `Φo` are set to `nothing`.
 """
 function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns;
-                        precision_policy=:mixed, qc1=10000, qc2=30000,
-                        compute_eigenfunctions::Bool=true,
-                        compute_odd::Bool=true,
-                        parallel::Bool=false,
-                        show_progress::Bool=false, 
+                        precision_policy=:float64, qc1::Union{Nothing,Real}=nothing,
+                        qc2::Union{Nothing,Real}=nothing,
+                        compute_eigenfunctions::Bool=false,
+                        compute_odd::Bool=false,
+                        parallel::Bool=true,
+                        show_progress::Bool=true, 
                         sweep_chunk_size::Union{Nothing,Integer}=nothing)
     _, β0, β = flow_decomposition(flow, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;

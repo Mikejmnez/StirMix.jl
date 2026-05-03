@@ -332,9 +332,9 @@ end
 
 
 function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe;
-                        show_progress::Bool=false,
-                        parallel::Bool=false,
-                        reconstruction::Symbol=:eigenfunctions)
+                        show_progress::Bool=true,
+                        parallel::Bool=true,
+                        reconstruction::Symbol=:coefficients)
     _validate_reconstruction(reconstruction)
 
     conj_spectrum = Pe < 0
@@ -495,9 +495,10 @@ end
 
 
 function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
-                              precision_policy=:mixed, qc1=10000, qc2=30000,
-                              parallel::Bool=false,
-                              show_progress::Bool=false, 
+                              precision_policy=:float64, qc1::Union{Nothing,Real}=nothing,
+                              qc2::Union{Nothing,Real}=nothing,
+                              parallel::Bool=true,
+                              show_progress::Bool=true, 
                               sweep_chunk_size::Union{Nothing,Integer}=nothing)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
@@ -522,9 +523,10 @@ end
 
 
 function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
-                              precision_policy=:mixed, qc1=10000, qc2=30000,
-                              parallel::Bool=false,
-                              show_progress::Bool=false, 
+                              precision_policy=:float64, qc1::Union{Nothing,Real}=nothing,
+                              qc2::Union{Nothing,Real}=nothing,
+                              parallel::Bool=true,
+                              show_progress::Bool=true, 
                               sweep_chunk_size::Union{Nothing,Integer}=nothing)
     conj_spectrum = Pe < 0
     Peabs = abs(Pe)
@@ -585,8 +587,8 @@ end
 
 
 function evolve_explicit_avg(dom, prep, Ccoeffs, tvals;
-                             show_progress::Bool=false,
-                             parallel::Bool=false)
+                             show_progress::Bool=true,
+                             parallel::Bool=true)
     nt = length(tvals)
     nx = length(dom.x)
 
