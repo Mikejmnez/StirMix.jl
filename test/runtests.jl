@@ -50,6 +50,13 @@ end
         @test any(q -> q isa ComplexF64, mixed_basis.qs)
         @test any(q -> q isa Complex{BigFloat}, mixed_basis.qs)
 
+        even_basis = spectral_basis(:cos, 1.0, dom, 10;
+                                    compute_odd=false)
+        @test even_basis.Φe !== nothing
+        @test even_basis.Φo === nothing
+        @test even_basis.bn === nothing
+        @test even_basis.Bk === nothing
+
         float64_progress_basis = redirect_stdout(devnull) do
             redirect_stderr(devnull) do
                 spectral_basis(:cos, 1.0, dom, 10;
@@ -200,6 +207,16 @@ end
         field = solve_explicit(dom, basis, gamma, ccoeffs, tvals, 1.0)
         parallel_field = solve_explicit(dom, basis, gamma, ccoeffs, tvals, 1.0;
                                         parallel=true)
+        coefficient_field = solve_explicit(dom, basis, gamma, ccoeffs, tvals, 1.0;
+                                           reconstruction=:coefficients)
+
+        coefficient_basis = spectral_basis(:cos, 1.0, dom, 10;
+                                           precision_policy=:float64,
+                                           compute_eigenfunctions=false,
+                                           compute_odd=false)
+        coefficient_only_field = solve_explicit(dom, coefficient_basis, gamma,
+                                                ccoeffs, tvals, 1.0;
+                                                reconstruction=:coefficients)
 
         no_progress_field, no_progress_output = capture_stderr() do
             solve_explicit(dom, basis, gamma, ccoeffs, progress_tvals, 1.0;
@@ -228,6 +245,15 @@ end
         @test no_progress_field == field
         @test progress_field == field
         @test parallel_field ≈ field
+        @test coefficient_field ≈ field
+        @test coefficient_only_field ≈ field
+        @test coefficient_basis.Φe === nothing
+        @test coefficient_basis.bn === nothing
+        @test_throws ArgumentError solve_explicit(dom, coefficient_basis, gamma,
+                                                  ccoeffs, tvals, 1.0)
+        @test_throws ArgumentError solve_explicit(dom, basis, gamma, ccoeffs,
+                                                  tvals, 1.0;
+                                                  reconstruction=:unknown)
         @test isempty(no_progress_output)
         @test occursin("Computing time-evolving solution", progress_output)
         @test !occursin("aborted", lowercase(progress_output))
@@ -238,5 +264,37 @@ end
         @test isempty(no_progress_avg_output)
         @test occursin("Computing time-evolving solution", progress_avg_output)
         @test !occursin("aborted", lowercase(progress_avg_output))
+    end
+
+    @testset "explicit evolution coefficient reconstruction" begin
+        gamma = ones(5)
+        ccoeffs = ones(ComplexF64, length(dom.K))
+        tvals = [0.1]
+
+        basis_with_phi = spectral_basis(:cos, 10.0, dom, 4;
+                                        precision_policy=:mixed,
+                                        qc1=0.0,
+                                        qc2=1.0e9,
+                                        compute_odd=false)
+        basis_coeff = spectral_basis(:cos, 10.0, dom, 4;
+                                     precision_policy=:mixed,
+                                     qc1=0.0,
+                                     qc2=1.0e9,
+                                     compute_eigenfunctions=false,
+                                     compute_odd=false)
+
+        field_with_phi = solve_explicit(dom, basis_with_phi, gamma, ccoeffs,
+                                        tvals, 10.0)
+        field_coeff = solve_explicit(dom, basis_coeff, gamma, ccoeffs,
+                                     tvals, 10.0;
+                                     reconstruction=:coefficients)
+
+        @test basis_coeff.Φe === nothing
+        @test basis_coeff.Φo === nothing
+        @test basis_coeff.bn === nothing
+        @test basis_coeff.Bk === nothing
+        @test any(k -> eltype(basis_coeff.Ak[k]) === Complex{BigFloat},
+                  eachindex(dom.K))
+        @test field_coeff ≈ field_with_phi
     end
 end

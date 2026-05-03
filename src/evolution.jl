@@ -87,6 +87,77 @@ function _prepare_mode_work(dom, basis, γ)
 end
 
 
+function _validate_reconstruction(reconstruction::Symbol)
+    reconstruction === :eigenfunctions && return nothing
+    reconstruction === :coefficients && return nothing
+    throw(ArgumentError("reconstruction must be :eigenfunctions or :coefficients; got $(repr(reconstruction))"))
+end
+
+
+function _cosine_y_basis(y::AbstractVector, R::Integer)
+    B = Matrix{Float64}(undef, length(y), R)
+    for r in 0:(R-1)
+        @inbounds for iy in eachindex(y)
+            B[iy, r + 1] = cos(2r * y[iy])
+        end
+    end
+    return B
+end
+
+
+function _prepare_coefficient_mode_work_point(dom, basis, γ, Pe, conj_spectrum, k)
+    Ak = conj_spectrum ? conj.(basis.Ak[k]) : basis.Ak[k]
+
+    R, Nn = size(Ak)
+    Kk = dom.K[k]
+
+    λ = ComplexF64.(basis.an[k])
+    if conj_spectrum
+        λ .= conj.(λ)
+    end
+    βshift = im * (Float64(basis.β0) / 2) * Kk * Float64(Pe)
+    @. λ = λ / 4 + Kk^2 + βshift
+
+    Nuse = min(R, length(γ))
+    γlow = @view γ[1:Nuse]
+
+    Tproj = promote_type(eltype(Ak), eltype(γ))
+    projection = Vector{Tproj}(undef, Nn)
+    if Nuse > 0
+        mul!(projection, transpose(view(Ak, 1:Nuse, :)), γlow)
+    else
+        fill!(projection, zero(Tproj))
+    end
+
+    By = _cosine_y_basis(dom.y, R)
+    Tfield = promote_type(eltype(By), eltype(projection))
+
+    e = Vector{ComplexF64}(undef, Nn)
+    modal = similar(projection)
+    coeff_y = Vector{Tproj}(undef, R)
+    f = Vector{Tfield}(undef, length(dom.y))
+
+    tail = cosine_tail_data(dom.y, γ, Nn)
+
+    return (Ak=Ak, λ=λ, projection=projection, By=By, e=e,
+            modal=modal, coeff_y=coeff_y, f=f, tail=tail)
+end
+
+
+function _prepare_coefficient_mode_work(dom, basis, γ, Pe;
+                                        conj_spectrum::Bool=false)
+    nk = length(dom.K)
+    work = Vector{Any}(undef, nk)
+
+    for k in 1:nk
+        work[k] = _prepare_coefficient_mode_work_point(dom, basis, γ, Pe,
+                                                       conj_spectrum, k)
+    end
+
+    return work
+end
+
+
 function _time_chunks(nt::Integer, nchunks::Integer)
     chunks = Vector{UnitRange{Int}}(undef, nchunks)
     for i in 1:nchunks
@@ -212,9 +283,60 @@ function _solve_explicit_time!(T, it, t, spectrum, tails, work,
 end
 
 
+function _add_tail!(f, tail, t, Kk)
+    m_tail, Atail, γtail, tmp = tail
+    isempty(m_tail) && return nothing
+
+    k2 = Kk^2
+    @inbounds for j in eachindex(m_tail)
+        tmp[j] = γtail[j] * exp(-Float64(t) * (Float64(m_tail[j])^2 + k2))
+    end
+    mul!(f, Atail, tmp, one(eltype(f)), one(eltype(f)))
+
+    return nothing
+end
+
+
+function _solve_explicit_time_coefficients!(T, it, t, spectrum, work,
+                                            dom, Ccoeffs, x0, nx, ny, nk)
+    fill!(spectrum, 0)
+    t64 = Float64(t)
+
+    for k in 1:nk
+        wk = work[k]
+        Kk = dom.K[k]
+
+        @. wk.e = exp(-t64 * wk.λ)
+        @. wk.modal = wk.projection * wk.e
+        mul!(wk.coeff_y, wk.Ak, wk.modal)
+        mul!(wk.f, wk.By, wk.coeff_y)
+        _add_tail!(wk.f, wk.tail, t64, Kk)
+
+        phase0 = Ccoeffs[k] * cis(Kk * x0)
+        col = @view spectrum[:, k]
+        if _irfft_self_conjugate_mode(k, nx)
+            @inbounds @simd for iy in 1:ny
+                col[iy] = nx * real(ComplexF64(wk.f[iy] * phase0))
+            end
+        else
+            scale = nx / 2
+            @inbounds @simd for iy in 1:ny
+                col[iy] = scale * ComplexF64(wk.f[iy] * phase0)
+            end
+        end
+    end
+
+    @views T[it, :, :] .= irfft(spectrum, nx, 2)
+    return nothing
+end
+
+
 function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe;
                         show_progress::Bool=false,
-                        parallel::Bool=false)
+                        parallel::Bool=false,
+                        reconstruction::Symbol=:eigenfunctions)
+    _validate_reconstruction(reconstruction)
+
     conj_spectrum = Pe < 0
     nt = length(tvals)
     ny = length(dom.y)
@@ -224,7 +346,7 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe;
     T = zeros(Float64, nt, ny, nx)
 
     x0 = dom.x[1]
-    _require_basis_eigenfunctions(basis)
+    reconstruction === :eigenfunctions && _require_basis_eigenfunctions(basis)
 
     # define progressmeter instance
     p = show_progress && nt > 0 ?
@@ -263,14 +385,27 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe;
 
             tasks = map(chunks) do chunk
                 Threads.@spawn begin
-                    local_tails, local_work = _prepare_mode_work(dom, basis, γ)
+                    if reconstruction === :coefficients
+                        local_work = _prepare_coefficient_mode_work(dom, basis, γ, Pe;
+                                                                    conj_spectrum=conj_spectrum)
+                    else
+                        local_tails, local_work = _prepare_mode_work(dom, basis, γ)
+                    end
                     local_spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
 
                     for it in chunk
-                        _solve_explicit_time!(T, it, tbuf[it], local_spectrum,
-                                              local_tails, local_work, dom, basis,
-                                              γ, Ccoeffs, Pe, conj_spectrum,
-                                              x0, nx, ny, nk)
+                        if reconstruction === :coefficients
+                            _solve_explicit_time_coefficients!(T, it, tbuf[it],
+                                                               local_spectrum,
+                                                               local_work, dom,
+                                                               Ccoeffs, x0,
+                                                               nx, ny, nk)
+                        else
+                            _solve_explicit_time!(T, it, tbuf[it], local_spectrum,
+                                                  local_tails, local_work, dom, basis,
+                                                  γ, Ccoeffs, Pe, conj_spectrum,
+                                                  x0, nx, ny, nk)
+                        end
                         advance_progress === nothing || advance_progress()
                     end
                 end
@@ -278,12 +413,23 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe;
 
             _fetch_all_tasks(tasks)
         else
-            tails, work = _prepare_mode_work(dom, basis, γ)
+            if reconstruction === :coefficients
+                work = _prepare_coefficient_mode_work(dom, basis, γ, Pe;
+                                                      conj_spectrum=conj_spectrum)
+            else
+                tails, work = _prepare_mode_work(dom, basis, γ)
+            end
             spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
 
             for (it, t) in enumerate(tvals)
-                _solve_explicit_time!(T, it, t, spectrum, tails, work, dom, basis,
-                                      γ, Ccoeffs, Pe, conj_spectrum, x0, nx, ny, nk)
+                if reconstruction === :coefficients
+                    _solve_explicit_time_coefficients!(T, it, t, spectrum,
+                                                       work, dom, Ccoeffs, x0,
+                                                       nx, ny, nk)
+                else
+                    _solve_explicit_time!(T, it, t, spectrum, tails, work, dom, basis,
+                                          γ, Ccoeffs, Pe, conj_spectrum, x0, nx, ny, nk)
+                end
                 advance_progress === nothing || advance_progress()
             end
         end

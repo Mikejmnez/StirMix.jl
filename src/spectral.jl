@@ -375,6 +375,7 @@ returned but `Φe` and `Φo` are set to `nothing`.
 function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
                         precision_policy=:mixed, qc1=10000, qc2=30000,
                         compute_eigenfunctions::Bool=true,
+                        compute_odd::Bool=true,
                         parallel::Bool = false,
                         show_progress::Bool=false, 
                         sweep_chunk_size::Union{Nothing,Integer}=nothing)
@@ -383,7 +384,8 @@ function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
                                   precision_policy=precision_policy, qc1=qc1, qc2=qc2,
                                   parallel=parallel,
                                   show_progress=show_progress,
-                                  compute_eigenfunctions=compute_eigenfunctions, 
+                                  compute_eigenfunctions=compute_eigenfunctions,
+                                  compute_odd=compute_odd,
                                   sweep_chunk_size=sweep_chunk_size)
 
     return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk,
@@ -400,6 +402,7 @@ returned but `Φe` and `Φo` are set to `nothing`.
 function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns;
                         precision_policy=:mixed, qc1=10000, qc2=30000,
                         compute_eigenfunctions::Bool=true,
+                        compute_odd::Bool=true,
                         parallel::Bool=false,
                         show_progress::Bool=false, 
                         sweep_chunk_size::Union{Nothing,Integer}=nothing)
@@ -408,7 +411,8 @@ function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns;
                                   precision_policy=precision_policy, qc1=qc1, qc2=qc2, 
                                   parallel=parallel,
                                   show_progress=show_progress,
-                                  compute_eigenfunctions=compute_eigenfunctions, 
+                                  compute_eigenfunctions=compute_eigenfunctions,
+                                  compute_odd=compute_odd,
                                   sweep_chunk_size=sweep_chunk_size)
 
     return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk,
