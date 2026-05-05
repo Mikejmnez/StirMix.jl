@@ -34,25 +34,28 @@ end
     dom = domain(1.0, 1, 8, 8)
 
     @testset "spectral basis eigenfunction toggle" begin
-        basis = spectral_basis(:cos, 1.0, dom, 10)
+        basis = spectral_basis(:cos, 1.0, dom, 10; 
+                               show_progress=false,
+                               compute_eigenfunctions=true)
         @test length(basis.qs) == length(dom.K)
         @test basis.Φe !== nothing
-        @test basis.Φo !== nothing
+        @test basis.Φo === nothing
         @test all(x -> x !== nothing, basis.Φe)
-        @test all(x -> x !== nothing, basis.Φo)
 
-        mixed_basis = spectral_basis(:cos, 10000.0, dom, 10;
-                                     compute_eigenfunctions=false)
+        mixed_basis = spectral_basis(:cos, 1000.0, dom, 10;
+                                     show_progress=false,
+                                     precision_policy=:mixed, 
+                                     qc1=5000, qc2=12000)
         @test mixed_basis.Φe === nothing
         @test mixed_basis.Φo === nothing
-        @test mixed_basis.bn !== nothing
-        @test mixed_basis.Bk !== nothing
+        @test mixed_basis.bn === nothing
+        @test mixed_basis.Bk === nothing
         @test any(q -> q isa ComplexF64, mixed_basis.qs)
         @test any(q -> q isa Complex{BigFloat}, mixed_basis.qs)
 
         even_basis = spectral_basis(:cos, 1.0, dom, 10;
-                                    compute_odd=false)
-        @test even_basis.Φe !== nothing
+                                    show_progress=false)
+        @test even_basis.Φe === nothing
         @test even_basis.Φo === nothing
         @test even_basis.bn === nothing
         @test even_basis.Bk === nothing
@@ -60,16 +63,14 @@ end
         float64_progress_basis = redirect_stdout(devnull) do
             redirect_stderr(devnull) do
                 spectral_basis(:cos, 1.0, dom, 10;
-                               precision_policy=:float64,
-                               show_progress=true)
+                               precision_policy=:float64)
             end
         end
         mixed_progress_basis = redirect_stdout(devnull) do
             redirect_stderr(devnull) do
-                spectral_basis(:cos, 10000.0, dom, 10;
+                spectral_basis(:cos, 1000.0, dom, 10;
                                precision_policy=:mixed,
-                               compute_eigenfunctions=false,
-                               show_progress=true)
+                               qc1=5000, qc2=15000)
             end
         end
 
@@ -83,14 +84,15 @@ end
             spectral_basis(:cos, 1.0, dom, 10;
                            precision_policy=:float64,
                            parallel=false,
-                           show_progress=true,
+                           compute_eigenfunctions=true,
+                           compute_odd=true,
                            sweep_chunk_size=Int32(2))
         end
         parallel_basis, parallel_output = capture_stderr() do
             spectral_basis(:cos, 1.0, dom, 10;
                            precision_policy=:float64,
-                           parallel=true,
-                           show_progress=true,
+                           compute_eigenfunctions=true,
+                           compute_odd=true,
                            sweep_chunk_size=2)
         end
 
@@ -106,27 +108,34 @@ end
         @test !occursin("aborted", lowercase(serial_output))
         @test !occursin("aborted", lowercase(parallel_output))
 
-        mixed_serial = spectral_basis(:cos, 10000.0, dom, 10;
+        mixed_serial = spectral_basis(:cos, 1000.0, dom, 10;
                                       precision_policy=:mixed,
-                                      compute_eigenfunctions=false,
+                                      qc1=5000, qc2=15000,
                                       parallel=false,
-                                      sweep_chunk_size=2)
-        mixed_parallel = spectral_basis(:cos, 10000.0, dom, 10;
+                                      sweep_chunk_size=2,
+                                      show_progress=false,
+                                      compute_eigenfunctions=true,
+                                      compute_odd=true)
+        mixed_parallel = spectral_basis(:cos, 1000.0, dom, 10;
                                         precision_policy=:mixed,
-                                        compute_eigenfunctions=false,
+                                        qc1=5000, qc2=15000,
                                         parallel=true,
-                                        sweep_chunk_size=2)
+                                        sweep_chunk_size=2,
+                                        show_progress=false,
+                                        compute_eigenfunctions=true,
+                                        compute_odd=true)
 
         @test mixed_serial.qs == mixed_parallel.qs
         @test any(q -> q isa Complex{BigFloat}, mixed_parallel.qs)
-        @test mixed_parallel.Φe === nothing
-        @test mixed_parallel.Φo === nothing
+        @test mixed_parallel.Φe !== nothing
+        @test mixed_parallel.Φo !== nothing
         @test all(k -> mixed_serial.an[k] == mixed_parallel.an[k], eachindex(dom.K))
         @test all(k -> mixed_serial.Ak[k] == mixed_parallel.Ak[k], eachindex(dom.K))
         @test all(k -> mixed_serial.bn[k] == mixed_parallel.bn[k], eachindex(dom.K))
         @test all(k -> mixed_serial.Bk[k] == mixed_parallel.Bk[k], eachindex(dom.K))
 
         @test_throws ArgumentError spectral_basis(:cos, 1.0, dom, 10;
+                                                  show_progress=:false,
                                                   precision_policy=:float64,
                                                   sweep_chunk_size=0)
     end
@@ -135,26 +144,29 @@ end
         gamma = ones(5)
         ccoeffs = ones(ComplexF64, length(dom.K))
 
-        basis = spectral_basis(:cos, 1.0, dom, 10)
-        field = solve_explicit(dom, basis, gamma, ccoeffs, [0.1], 1.0)
+        basis = spectral_basis(:cos, 1.0, dom, 10; show_progress=false)
+        field = solve_explicit(dom, basis, gamma, ccoeffs, [0.1], 1.0;
+                               show_progress=false)
         @test size(field) == (1, length(dom.y), length(dom.x))
 
-        prep = prepare_explicit_avg(dom, :cos, gamma, 10000.0, 10)
-        avg_field = evolve_explicit_avg(dom, prep, ccoeffs, [0.1])
+        prep = prepare_explicit_avg(dom, :cos, gamma, 1000.0, 10;
+                                    precision_policy=:mixed,
+                                    qc1=5000, qc2 = 15000,
+                                    show_progress=false)
+        avg_field = evolve_explicit_avg(dom, prep, ccoeffs, [0.1]; 
+                                        show_progress=false)
 
         U, _, _ = predefined_flow(:cos, dom)
         symbol_progress_prep = redirect_stdout(devnull) do
             redirect_stderr(devnull) do
                 prepare_explicit_avg(dom, :cos, gamma, 1.0, 10;
-                                     precision_policy=:float64,
-                                     show_progress=true)
+                                     precision_policy=:float64)
             end
         end
         vector_progress_prep = redirect_stdout(devnull) do
             redirect_stderr(devnull) do
                 prepare_explicit_avg(dom, U, gamma, 1.0, 10;
-                                     precision_policy=:float64,
-                                     show_progress=true)
+                                     precision_policy=:float64)
             end
         end
 
@@ -203,19 +215,21 @@ end
         tvals = [0.1, 0.2, 0.3]
         progress_tvals = ProgressTestTimes(tvals)
 
-        basis = spectral_basis(:cos, 1.0, dom, 10; precision_policy=:float64)
-        field = solve_explicit(dom, basis, gamma, ccoeffs, tvals, 1.0)
+        basis = spectral_basis(:cos, 1.0, dom, 10; precision_policy=:float64, show_progress=false)
+        field = solve_explicit(dom, basis, gamma, ccoeffs, tvals, 1.0, show_progress=false)
         parallel_field = solve_explicit(dom, basis, gamma, ccoeffs, tvals, 1.0;
-                                        parallel=true)
+                                        parallel=true, show_progress=false)
         coefficient_field = solve_explicit(dom, basis, gamma, ccoeffs, tvals, 1.0;
-                                           reconstruction=:coefficients)
+                                           reconstruction=:coefficients, show_progress=false)
 
         coefficient_basis = spectral_basis(:cos, 1.0, dom, 10;
+                                           show_progress=false,
                                            precision_policy=:float64,
                                            compute_eigenfunctions=false,
                                            compute_odd=false)
         coefficient_only_field = solve_explicit(dom, coefficient_basis, gamma,
                                                 ccoeffs, tvals, 1.0;
+                                                show_progress=false,
                                                 reconstruction=:coefficients)
 
         no_progress_field, no_progress_output = capture_stderr() do
@@ -228,10 +242,10 @@ end
         end
 
         prep = prepare_explicit_avg(dom, :cos, gamma, 1.0, 10;
-                                    precision_policy=:float64)
-        avg_field = evolve_explicit_avg(dom, prep, ccoeffs, tvals)
+                                    precision_policy=:float64, show_progress=false)
+        avg_field = evolve_explicit_avg(dom, prep, ccoeffs, tvals, show_progress=false)
         parallel_avg = evolve_explicit_avg(dom, prep, ccoeffs, tvals;
-                                           parallel=true)
+                                           parallel=true, show_progress=false)
 
         no_progress_avg, no_progress_avg_output = capture_stderr() do
             evolve_explicit_avg(dom, prep, ccoeffs, progress_tvals;
@@ -250,9 +264,11 @@ end
         @test coefficient_basis.Φe === nothing
         @test coefficient_basis.bn === nothing
         @test_throws ArgumentError solve_explicit(dom, coefficient_basis, gamma,
-                                                  ccoeffs, tvals, 1.0)
+                                                  ccoeffs, tvals, 1.0; 
+                                                  reconstruction=:eigenfunctions)
         @test_throws ArgumentError solve_explicit(dom, basis, gamma, ccoeffs,
                                                   tvals, 1.0;
+                                                  show_progress=false,
                                                   reconstruction=:unknown)
         @test isempty(no_progress_output)
         @test occursin("Computing time-evolving solution", progress_output)
@@ -272,21 +288,24 @@ end
         tvals = [0.1]
 
         basis_with_phi = spectral_basis(:cos, 10.0, dom, 4;
+                                        show_progress=false,
                                         precision_policy=:mixed,
                                         qc1=0.0,
                                         qc2=1.0e9,
+                                        compute_eigenfunctions=true,
                                         compute_odd=false)
         basis_coeff = spectral_basis(:cos, 10.0, dom, 4;
                                      precision_policy=:mixed,
+                                     show_progress=false,
                                      qc1=0.0,
                                      qc2=1.0e9,
                                      compute_eigenfunctions=false,
                                      compute_odd=false)
 
         field_with_phi = solve_explicit(dom, basis_with_phi, gamma, ccoeffs,
-                                        tvals, 10.0)
+                                        tvals, 10.0; show_progress=false)
         field_coeff = solve_explicit(dom, basis_coeff, gamma, ccoeffs,
-                                     tvals, 10.0;
+                                     tvals, 10.0; show_progress=false,
                                      reconstruction=:coefficients)
 
         @test basis_coeff.Φe === nothing
