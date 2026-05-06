@@ -1,8 +1,8 @@
 
 
-predefined_flow(flow::Symbol, dom; Nmodes=length(dom.K)-1) = predefined_flow(Val(flow), dom; Nmodes=Nmodes)
+predefined_flow(flow::Symbol, dom; Nmodes=length(dom.y)-1) = predefined_flow(Val(flow), dom; Nmodes=Nmodes)
 
-function predefined_flow(::Val{:cos}, dom; Nmodes=length(dom.K)-1)
+function predefined_flow(::Val{:cos}, dom; Nmodes=length(dom.y)÷2)
     U = (1 .- cos.(2 .* dom.y)) ./ 2
     β0 = 1.0
     β = zeros(Float64, Nmodes)
@@ -12,7 +12,7 @@ function predefined_flow(::Val{:cos}, dom; Nmodes=length(dom.K)-1)
     return U, β0, β
 end
 
-function predefined_flow(::Val{:square}, dom; Nmodes=length(dom.K)-1)
+function predefined_flow(::Val{:square}, dom; Nmodes=length(dom.y)÷2)
     y = dom.y
     U = Float64.((pi/4 .<= y) .& (y .<= 3pi/4))
     β0 = 1.0
@@ -21,7 +21,7 @@ function predefined_flow(::Val{:square}, dom; Nmodes=length(dom.K)-1)
 end
 
 
-function predefined_flow(::Val{:poiseuille}, dom; Nmodes=length(dom.K)-1)
+function predefined_flow(::Val{:poiseuille}, dom; Nmodes=length(dom.y)÷2)
     y = dom.y
     U = 1 .- ((y .- pi/2)/(pi/2)).^2
     β0 = 4/3
@@ -29,7 +29,7 @@ function predefined_flow(::Val{:poiseuille}, dom; Nmodes=length(dom.K)-1)
     return U, β0, β
 end
 
-function predefined_flow(::Val{:gaussian}, dom; Nmodes=length(dom.K)-1)
+function predefined_flow(::Val{:gaussian}, dom; Nmodes=length(dom.y)÷2)
     y = dom.y
     Ld = 0.8
     U = exp.(− (Ld^2) .* (2y .− π) .^ 2 )
