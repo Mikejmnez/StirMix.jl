@@ -322,9 +322,34 @@ end
         dom = domain(1.0, 1, Nx, Ny)
         U, β0_1, β_1 = predefined_flow(:poiseuille, dom)
         β0_2, β_2, _ = normal_mode_decomposition(U, dom.y; Lx=Ny)
+    end
 
+    @testset "cosine tail" begin 
+        Nx = 20
+        Ny = 200
+        M  = 1
+        L  = 1/pi
+        dom = domain(L, M, Nx, Ny)
 
+        # ==================================
+        # Initial condition in cross-stream direction
+        # only has even Fourier series
+        # ==================================
+        σ2_y0 = 1/40
+        g = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2))
+        χ_0, χ_e, _ = normal_mode_decomposition(g, 2*dom.y; Lx=2π)
+        γ_e = vcat(χ_0, χ_e);
 
+        NMax = 10 # Tail data begins with the following normal mode
+        Nnm = length(γ_e) - NMax # how many tail cosine modes there will be
+
+        m_etail, Atail, γ_etail, _ = cosine_tail_data(dom.y, γ_e, NMax)
+
+        @test size(Atail) == (length(dom.y), Nnm)
+        @test γ_etail[1] === γ_e[NMax+1]
+        @test isapprox(Atail[:, 1], cos.(NMax*2*dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Atail[:, 1], cos.(m_etail[1]*2*dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Atail[:, 2], cos.(m_etail[2]*2*dom.y); atol = 1e-4, rtol = 1e-4)
 
     end
 end
