@@ -193,7 +193,7 @@ end
 
 function flow_decomposition(flow::Symbol, domain::Domain)
 
-    U, β0, β = predefined_flow(flow, domain; Nmodes=length(domain.K)-1)
+    U, β0, β = predefined_flow(flow, domain; Nmodes=length(domain.y)÷2)
 
     return U, β0, β
 end

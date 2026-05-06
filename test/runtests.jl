@@ -333,7 +333,6 @@ end
 
         # ==================================
         # Initial condition in cross-stream direction
-        # only has even Fourier series
         # ==================================
         σ2_y0 = 1/40
         g = @. exp(-(((dom.y-pi/4)/(sqrt(2*σ2_y0))).^2))
