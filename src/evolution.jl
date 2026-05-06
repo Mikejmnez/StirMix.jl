@@ -57,22 +57,37 @@ function _require_basis_eigenfunctions(basis)
 end
 
 
-function _prepare_mode_work(dom, basis, γ)
+function _prepare_mode_work(dom, basis, γ, γ_o=nothing)
     _require_basis_eigenfunctions(basis)
 
     nk = length(dom.K)
 
-    tails  = Vector{Any}(undef, nk)
+    etails  = Vector{Any}(undef, nk)
     work   = Vector{Any}(undef, nk)
+
+    if γ_o !== nothing
+        otails  = Vector{Any}(undef, nk)    
+    else
+        e_o = nothing
+        C_o = nothing
+        Umat_o = nothing
+        f_o = nothing
+        otails  = nothing   
+    end
 
     for k in 1:nk
         Φe = basis.Φe[k]
         Ak = basis.Ak[k]
         an = basis.an[k]
 
-        ny, Nn = size(Φe)
+        # this may be empty
+        Φo = basis.Φo[k]
+        Bk = basis.Bk[k]
+        bn = basis.bn[k]
 
-        tails[k]  = cosine_tail_data(dom.y, γ, Nn)
+        ny, Nn = size(Φe) # same size as odd
+
+        etails[k] = cosine_tail_data(dom.y, γ, Nn)
 
         e = Vector{eltype(an)}(undef, Nn)
         C = similar(Ak)
@@ -80,10 +95,18 @@ function _prepare_mode_work(dom, basis, γ)
         Tf = promote_type(eltype(Umat), eltype(γ))
         f = Vector{Tf}(undef, ny)
 
-        work[k] = (e=e, C=C, U=Umat, f=f)
+        if γ_o !== nothing
+            otails[k] = sine_tail_data(dom.y, γ_o, Nn)
+            e_o = Vector{eltype(bn)}(undef, Nn)
+            C_o = similar(Bk)
+            Umat_o = Matrix{promote_type(eltype(Φo), eltype(Bk), eltype(bn))}(undef, ny, Nn)
+            f_o = Vector{Tf}(undef, ny)
+        end
+
+        work[k] = (e=e, C=C, U=Umat, f=f, e_o=e_o, C_o=C_o, U_o=Umat_o, f_o=f_o)
     end
 
-    return tails, work
+    return etails, work, otails
 end
 
 
@@ -104,6 +127,15 @@ function _cosine_y_basis(y::AbstractVector, R::Integer)
     return B
 end
 
+function _sine_y_basis(y::AbstractVector, R::Integer)
+    B = Matrix{Float64}(undef, length(y), R)
+    for r in 0:(R-1)
+        @inbounds for iy in eachindex(y)
+            B[iy, r + 1] = sin(2(r+1) * y[iy])
+        end
+    end
+    return B
+end
 
 function _prepare_coefficient_mode_work_point(dom, basis, γ, Pe, conj_spectrum, k)
     Ak = conj_spectrum ? conj.(basis.Ak[k]) : basis.Ak[k]
@@ -189,20 +221,6 @@ function _fetch_all_tasks(tasks)
 end
 
 
-function prepare_mode_data(dom, basis, γ, Ccoeffs)
-    nk = length(dom.K)
-
-    phases = Vector{Vector{ComplexF64}}(undef, nk)
-    for k in 1:nk
-        phases[k] = Ccoeffs[k] .* exp.(im .* dom.K[k] .* dom.x)
-    end
-
-    tails, work = _prepare_mode_work(dom, basis, γ)
-
-    return phases, tails, work
-end
-
-
 function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe; conj_spectrum=false)
     nk = length(dom.K)
 
@@ -239,15 +257,20 @@ function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe; conj_spectrum=false)
 end
 
 
-function _solve_explicit_time!(T, it, t, spectrum, tails, work,
-                               dom, basis, γ, Ccoeffs, Pe, conj_spectrum,
+function _solve_explicit_time!(T, it, t, spectrum, tails, work, otails,
+                               dom, basis, γ, γ_o, Ccoeffs, Pe, conj_spectrum,
                                x0, nx, ny, nk)
     fill!(spectrum, 0)
 
     for k in 1:nk
-        Φe = conj_spectrum ? conj.(basis.Φe[k]) : basis.Φe[k]
-        Ak = conj_spectrum ? conj.(basis.Ak[k]) : basis.Ak[k]
-        an = conj_spectrum ? conj.(basis.an[k]) : basis.an[k]
+        Φe = basis.Φe[k]
+        Ak = basis.Ak[k]
+        an = basis.an[k]
+
+        Φo = basis.Φo[k]
+        Bk = basis.Bk[k]
+        bn = basis.bn[k]
+
         Kk = dom.K[k]
 
         e = work[k].e
@@ -255,25 +278,41 @@ function _solve_explicit_time!(T, it, t, spectrum, tails, work,
         Umat = work[k].U
         f = work[k].f
 
+        # here work odd pairs
+        e_o = work[k].e_o
+        C_o = work[k].C_o
+        Umat_o = work[k].U_o
+        f_o = work[k].f_o
+
         m_tail, Atail, γtail, tmp = tails[k]
+
+        m_otail, Btail, γotail, otmp = otails[k]
 
         e .= exp.(-t .* ((an ./ 4) .+ Kk^2 .+ (im * (basis.β0/2) * Kk * Pe)))
         C .= Ak .* reshape(e, 1, :)
         mul!(Umat, Φe, transpose(C))
 
+        e_o .= exp.(-t .* ((bn ./ 4) .+ Kk^2 .+ (im * (basis.β0/2) * Kk * Pe)))
+        C_o .= Bk .* reshape(e_o, 1, :)
+        mul!(Umat_o, Φo, transpose(C_o))
+
         reconstruct!(f, Umat, γ, Atail, γtail, m_tail, tmp, t, Kk)
+
+        if γ_o !== nothing
+            reconstruct!(f_o, Umat_o, γ_o, Btail, γotail, m_otail, otmp, t, Kk)
+        end
 
         # Modal reconstruction may use high precision; FFTW x-inversion is Float64.
         phase0 = Ccoeffs[k] * cis(Kk * x0)
         col = @view spectrum[:, k]
         if _irfft_self_conjugate_mode(k, nx)
             @inbounds @simd for iy in 1:ny
-                col[iy] = nx * real(ComplexF64(f[iy] * phase0))
+                col[iy] = nx * real(ComplexF64((f[iy] + f_o[iy]) * phase0))
             end
         else
             scale = nx / 2
             @inbounds @simd for iy in 1:ny
-                col[iy] = scale * ComplexF64(f[iy] * phase0)
+                col[iy] = scale * ComplexF64((f[iy] + f_o[iy]) * phase0)
             end
         end
     end
@@ -331,7 +370,7 @@ function _solve_explicit_time_coefficients!(T, it, t, spectrum, work,
 end
 
 
-function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe;
+function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
                         show_progress::Bool=true,
                         parallel::Bool=true,
                         reconstruction::Symbol=:coefficients)
@@ -389,7 +428,7 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe;
                         local_work = _prepare_coefficient_mode_work(dom, basis, γ, Pe;
                                                                     conj_spectrum=conj_spectrum)
                     else
-                        local_tails, local_work = _prepare_mode_work(dom, basis, γ)
+                        local_tails, local_work, local_otails = _prepare_mode_work(dom, basis, γ, γ_o)
                     end
                     local_spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
 
@@ -402,8 +441,8 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe;
                                                                nx, ny, nk)
                         else
                             _solve_explicit_time!(T, it, tbuf[it], local_spectrum,
-                                                  local_tails, local_work, dom, basis,
-                                                  γ, Ccoeffs, Pe, conj_spectrum,
+                                                  local_tails, local_work, local_otails, dom, basis,
+                                                  γ, γ_o, Ccoeffs, Pe, conj_spectrum,
                                                   x0, nx, ny, nk)
                         end
                         advance_progress === nothing || advance_progress()
@@ -417,7 +456,7 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe;
                 work = _prepare_coefficient_mode_work(dom, basis, γ, Pe;
                                                       conj_spectrum=conj_spectrum)
             else
-                tails, work = _prepare_mode_work(dom, basis, γ)
+                tails, work, otails = _prepare_mode_work(dom, basis, γ, γ_o)
             end
             spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
 
@@ -427,8 +466,8 @@ function solve_explicit(dom, basis, γ, Ccoeffs, tvals, Pe;
                                                        work, dom, Ccoeffs, x0,
                                                        nx, ny, nk)
                 else
-                    _solve_explicit_time!(T, it, t, spectrum, tails, work, dom, basis,
-                                          γ, Ccoeffs, Pe, conj_spectrum, x0, nx, ny, nk)
+                    _solve_explicit_time!(T, it, t, spectrum, tails, work, otails, dom, basis,
+                                          γ, γ_o, Ccoeffs, Pe, conj_spectrum, x0, nx, ny, nk)
                 end
                 advance_progress === nothing || advance_progress()
             end
