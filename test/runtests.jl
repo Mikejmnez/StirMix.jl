@@ -324,7 +324,7 @@ end
         β0_2, β_2, _ = normal_mode_decomposition(U, dom.y; Lx=Ny)
     end
 
-    @testset "cosine tail" begin 
+    @testset "tail normal modes" begin 
         Nx = 20
         Ny = 200
         M  = 1
@@ -336,20 +336,32 @@ end
         # only has even Fourier series
         # ==================================
         σ2_y0 = 1/40
-        g = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2))
-        χ_0, χ_e, _ = normal_mode_decomposition(g, 2*dom.y; Lx=2π)
+        g = @. exp(-(((dom.y-pi/4)/(sqrt(2*σ2_y0))).^2))
+        χ_0, χ_e, γ_o = normal_mode_decomposition(g, 2*dom.y; Lx=2π)
         γ_e = vcat(χ_0, χ_e);
-
+        
         NMax = 10 # Tail data begins with the following normal mode
         Nnm = length(γ_e) - NMax # how many tail cosine modes there will be
+        NNmo = length(γ_o) - NMax
 
         m_etail, Atail, γ_etail, _ = cosine_tail_data(dom.y, γ_e, NMax)
+        m_otail, Btail, γ_otail, _ = sine_tail_data(dom.y, γ_o, NMax)
 
         @test size(Atail) == (length(dom.y), Nnm)
         @test γ_etail[1] === γ_e[NMax+1]
+        @test γ_otail[1] === γ_o[NMax+1]
+
         @test isapprox(Atail[:, 1], cos.(NMax*2*dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Btail[:, 1], sin.(NMax*2*dom.y); atol = 1e-4, rtol = 1e-4)
+
         @test isapprox(Atail[:, 1], cos.(m_etail[1]*2*dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Btail[:, 1], sin.(m_otail[1]*2*dom.y); atol = 1e-4, rtol = 1e-4)
+
         @test isapprox(Atail[:, 2], cos.(m_etail[2]*2*dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Btail[:, 2], sin.(m_otail[2]*2*dom.y); atol = 1e-4, rtol = 1e-4)
+
+        @test isapprox(Atail[:, 5], cos.(m_etail[5]*2*dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Btail[:, 5], sin.(m_otail[5]*2*dom.y); atol = 1e-4, rtol = 1e-4)
 
     end
 end

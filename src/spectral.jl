@@ -60,10 +60,10 @@ end
 Build the cosine basis and coefficient views for the tail modes m = Nn:Mmax,
 where Mmax = length(γ) - 1.
 
-Returns `(m_tail, Btail, γtail, tmp)` where:
+Returns `(m_tail, Atail, γtail, tmp)` where:
 
 - `m_tail` : vector of mode indices Nn:Mmax
-- `Btail`  : cosine basis matrix with columns cos.(2m*y)
+- `Atail`  : cosine basis matrix with columns cos.(2m*y)
 - `γtail`  : view into γ corresponding to modes Nn:Mmax
 - `tmp`    : work array similar to γtail
 
@@ -77,9 +77,50 @@ function cosine_tail_data(y::AbstractVector, γ::AbstractVector, Nn::Integer)
         Mt = length(m_tail)
         ny = length(y)
 
+        Atail = Matrix{Float64}(undef, ny, Mt)
+        for (j, m) in enumerate(m_tail)
+            @inbounds Atail[:, j] .= cos.(2m .* y)
+        end
+
+        γtail = @view γ[(Nn+1):(Mmax+1)]           # γ[mode m] stored at index m+1
+        tmp = similar(γtail)
+    else
+        m_tail = Int[]
+        Atail = zeros(Float64, length(y), 0)
+        γtail = @view γ[1:0]
+        tmp = similar(γtail)
+    end
+
+    return m_tail, Atail, γtail, tmp
+end
+
+
+"""
+    sine_tail_data(y, γ, Nn)
+
+Build the sine basis and coefficient views for the tail modes m = Nn:Mmax,
+where Mmax = length(γ) - 1.
+
+Returns `(m_tail, Btail, γtail, tmp)` where:
+
+- `m_tail` : vector of mode indices Nn:Mmax
+- `Btail`  : sine basis matrix with columns sin.(2m*y)
+- `γtail`  : view into γ corresponding to modes Nn:Mmax
+- `tmp`    : work array similar to γtail
+
+If `Mmax < Nn`, returns empty objects of compatible size.
+"""
+function sine_tail_data(y::AbstractVector, γ::AbstractVector, Nn::Integer)
+    Mmax = length(γ) - 1
+
+    if Mmax >= Nn
+        m_tail = collect(Nn:Mmax)                  # modes m = Nn, ..., Mmax
+        Mt = length(m_tail)
+        ny = length(y)
+
         Btail = Matrix{Float64}(undef, ny, Mt)
         for (j, m) in enumerate(m_tail)
-            @inbounds Btail[:, j] .= cos.(2m .* y)
+            @inbounds Btail[:, j] .= sin.(2m .* y)
         end
 
         γtail = @view γ[(Nn+1):(Mmax+1)]           # γ[mode m] stored at index m+1
@@ -93,6 +134,8 @@ function cosine_tail_data(y::AbstractVector, γ::AbstractVector, Nn::Integer)
 
     return m_tail, Btail, γtail, tmp
 end
+
+
 
 
 function _q_values(K::AbstractVector, Pe::Real; 
@@ -150,7 +193,7 @@ end
 
 function flow_decomposition(flow::Symbol, domain::Domain)
 
-    U, β0, β = predefined_flow(flow, domain; Nmodes=length(domain.K))
+    U, β0, β = predefined_flow(flow, domain; Nmodes=length(domain.K)-1)
 
     return U, β0, β
 end
