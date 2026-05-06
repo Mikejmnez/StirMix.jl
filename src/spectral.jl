@@ -446,7 +446,7 @@ Collect eigenpairs for a predefined flow over the alongstream wavenumber sweep.
 If `compute_eigenfunctions=false`, the eigenvector/eigenvalue data are still
 returned but `Φe` and `Φo` are set to `nothing`.
 """
-function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns;
+function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns::Union{Nothing,Integer}=nothing;
                         precision_policy=:float64, qc1::Union{Nothing,Real}=nothing,
                         qc2::Union{Nothing,Real}=nothing,
                         compute_eigenfunctions::Bool=false,
