@@ -385,11 +385,14 @@ end
         c0, ce, co = normal_mode_decomposition(f, dom.x; Lx=2*L*π)
         Ccoeffs = vcat(c0/2, complex_x_coeffs(ce, co))
 
-        basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,compute_eigenfunctions=:true, compute_odd=:true)
-        T = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe; show_progress=false, parallel=false, reconstruction=:eigenfunctions)
-    
+        basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,compute_eigenfunctions=:true, compute_odd=:true)    
         # check initial condition in y direction
-        @test isapprox(T[1, :, 5], g; atol=1e-2,  rtol = 1e-4)
+        T_serial = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe; show_progress=false,parallel=false, reconstruction=:eigenfunctions)
+        T_parallel = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe; show_progress=false, reconstruction=:eigenfunctions)
+
+        # check initial condition in y direction
+        @test isapprox(T_serial[1,:,:], T_parallel[1,:,:]; atol=1e-7)
+        @test isapprox(T_serial[1, :, 5], g; atol=1e-2,  rtol = 1e-4)
 
     end
     @testset "test initial condition mapping in x" begin
@@ -415,10 +418,12 @@ end
         Ccoeffs = vcat(c0/2, complex_x_coeffs(ce, co))
 
         basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,compute_eigenfunctions=:true, compute_odd=:true)
-        T = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe; show_progress=false,parallel=false, reconstruction=:eigenfunctions)
-    
+        T_serial = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe; show_progress=false,parallel=false, reconstruction=:eigenfunctions)
+        T_parallel = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe; show_progress=false, reconstruction=:eigenfunctions)
+
         # check initial condition in y direction
-        @test isapprox(T[1, 5, :], f; atol=1e-2,  rtol = 1e-4)
+        @test isapprox(T_serial[1,:,:], T_parallel[1,:,:]; atol=1e-7)
+        @test isapprox(T_serial[1, 5, :], f; atol=1e-2,  rtol = 1e-4)
 
     end
 
