@@ -1,6 +1,6 @@
 
 
-predefined_flow(flow::Symbol, dom; Nmodes=length(dom.y)-1) = predefined_flow(Val(flow), dom; Nmodes=Nmodes)
+predefined_flow(flow::Symbol, dom; Nmodes=length(dom.y)÷2) = predefined_flow(Val(flow), dom; Nmodes=Nmodes)
 
 function predefined_flow(::Val{:cos}, dom; Nmodes=length(dom.y)÷2)
     U = (1 .- cos.(2 .* dom.y)) ./ 2

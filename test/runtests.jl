@@ -316,4 +316,15 @@ end
                   eachindex(dom.K))
         @test field_coeff ≈ field_with_phi
     end
+    @testset "flow decomposition comparison: predetermined vs prescribed" begin
+        Nx=8
+        Ny=28
+        dom = domain(1.0, 1, Nx, Ny)
+        U, β0_1, β_1 = predefined_flow(:poiseuille, dom)
+        β0_2, β_2, _ = normal_mode_decomposition(U, dom.y; Lx=Ny)
+
+
+
+
+    end
 end
