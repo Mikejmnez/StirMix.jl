@@ -91,16 +91,13 @@ function _sine_y_basis(y::AbstractVector, R::Integer)
     return B
 end
 
-function _prepare_coefficient_mode_work_point(dom, basis, γ, Pe, conj_spectrum, k)
-    Ak = conj_spectrum ? conj.(basis.Ak[k]) : basis.Ak[k]
+function _prepare_coefficient_mode_work_point(dom, basis, γ, Pe, k)
+    Ak = basis.Ak[k]
 
     R, Nn = size(Ak)
     Kk = dom.K[k]
 
     λ = ComplexF64.(basis.an[k])
-    if conj_spectrum
-        λ .= conj.(λ)
-    end
     βshift = im * (Float64(basis.β0) / 2) * Kk * Float64(Pe)
     @. λ = λ / 4 + Kk^2 + βshift
 
@@ -130,14 +127,12 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, Pe, conj_spectrum,
 end
 
 
-function _prepare_coefficient_mode_work(dom, basis, γ, Pe;
-                                        conj_spectrum::Bool=false)
+function _prepare_coefficient_mode_work(dom, basis, γ, Pe)
     nk = length(dom.K)
     work = Vector{Any}(undef, nk)
 
     for k in 1:nk
-        work[k] = _prepare_coefficient_mode_work_point(dom, basis, γ, Pe,
-                                                       conj_spectrum, k)
+        work[k] = _prepare_coefficient_mode_work_point(dom, basis, γ, Pe, k)
     end
 
     return work
@@ -175,7 +170,7 @@ function _fetch_all_tasks(tasks)
 end
 
 
-function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe; conj_spectrum=false)
+function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe)
     nk = length(dom.K)
 
     work = Vector{AvgModeWork}(undef, nk)
@@ -183,8 +178,8 @@ function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe; conj_spectrum=false)
     βshift = im * (β0 / 2) * Pe
 
     for k in 1:nk
-        Akk = conj_spectrum ? conj.(Ak[k])    : Ak[k]
-        ank = conj_spectrum ? conj.(avals[k]) : avals[k]
+        Akk = Ak[k]
+        ank = avals[k]
 
         Nn = length(ank)
         Kk = dom.K[k]
@@ -212,7 +207,7 @@ end
 
 
 function _solve_explicit_time!(T, it, t, spectrum, tails, work, otails,
-                               dom, basis, γ, γ_o, Ccoeffs, Pe, conj_spectrum,
+                               dom, basis, γ, γ_o, Ccoeffs, Pe,
                                x0, nx, ny, nk)
     fill!(spectrum, 0)
 
@@ -330,7 +325,6 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
                         reconstruction::Symbol=:coefficients)
     _validate_reconstruction(reconstruction)
 
-    conj_spectrum = Pe < 0
     nt = length(tvals)
     ny = length(dom.y)
     nx = length(dom.x)
@@ -379,8 +373,7 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
             tasks = map(chunks) do chunk
                 Threads.@spawn begin
                     if reconstruction === :coefficients
-                        local_work = _prepare_coefficient_mode_work(dom, basis, γ, Pe;
-                                                                    conj_spectrum=conj_spectrum)
+                        local_work = _prepare_coefficient_mode_work(dom, basis, γ, Pe)
                     else
                         local_tails, local_work, local_otails = _prepare_mode_work(dom, basis, γ, γ_o)
                     end
@@ -396,7 +389,7 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
                         else
                             _solve_explicit_time!(T, it, tbuf[it], local_spectrum,
                                                   local_tails, local_work, local_otails, dom, basis,
-                                                  γ, γ_o, Ccoeffs, Pe, conj_spectrum,
+                                                  γ, γ_o, Ccoeffs, Pe,
                                                   x0, nx, ny, nk)
                         end
                         advance_progress === nothing || advance_progress()
@@ -407,8 +400,7 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
             _fetch_all_tasks(tasks)
         else
             if reconstruction === :coefficients
-                work = _prepare_coefficient_mode_work(dom, basis, γ, Pe;
-                                                      conj_spectrum=conj_spectrum)
+                work = _prepare_coefficient_mode_work(dom, basis, γ, Pe)
             else
                 tails, work, otails = _prepare_mode_work(dom, basis, γ, γ_o)
             end
@@ -421,7 +413,7 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
                                                        nx, ny, nk)
                 else
                     _solve_explicit_time!(T, it, t, spectrum, tails, work, otails, dom, basis,
-                                          γ, γ_o, Ccoeffs, Pe, conj_spectrum, x0, nx, ny, nk)
+                                          γ, γ_o, Ccoeffs, Pe, x0, nx, ny, nk)
                 end
                 advance_progress === nothing || advance_progress()
             end
@@ -493,7 +485,6 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
                               parallel::Bool=true,
                               show_progress::Bool=true, 
                               sweep_chunk_size::Union{Nothing,Integer}=nothing)
-    conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
 
@@ -508,8 +499,7 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
                                   compute_odd=false, 
                                   sweep_chunk_size=sweep_chunk_size) # this is not true always
 
-    work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe;
-                                 conj_spectrum=conj_spectrum)
+    work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe)
 
     return (; β0, work)
 end
@@ -521,7 +511,6 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
                               parallel::Bool=true,
                               show_progress::Bool=true, 
                               sweep_chunk_size::Union{Nothing,Integer}=nothing)
-    conj_spectrum = Pe < 0
     Peabs = abs(Pe)
     Nmax = length(γ)
 
@@ -536,8 +525,7 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
                                   compute_odd=false, 
                                   sweep_chunk_size=sweep_chunk_size)
 
-    work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe;
-                                 conj_spectrum=conj_spectrum)
+    work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe)
 
     return (; β0, work)
 end
