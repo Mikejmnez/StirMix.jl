@@ -238,7 +238,9 @@ function _scatter_spectral_batch!(qs, an, bn, Ak, Bk, Φe, Φo,
                                   parallel::Bool=false)
     isempty(idx) && return nothing
 
-    units_per_q = (1 + Int(compute_odd)) * (1 + Int(compute_eigenfunctions))
+    units_per_q = 1 + Int(compute_odd) +
+                  Int(compute_eigenfunctions) +
+                  Int(compute_odd && compute_eigenfunctions)
 
     if parallel && Threads.nthreads() > 1 && length(qbatch) > 1
         Threads.@threads :dynamic for j in 1:length(qbatch)
@@ -332,11 +334,13 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
 
     an = Vector{Any}(undef, nk)
     Ak = Vector{Any}(undef, nk)
+    compute_odd_eigenfunctions = compute_odd && compute_eigenfunctions
+
     Φe = compute_eigenfunctions ? Vector{Any}(undef, nk) : nothing
 
     bn = compute_odd ? Vector{Any}(undef, nk) : nothing
     Bk = compute_odd ? Vector{Any}(undef, nk) : nothing
-    Φo = (compute_odd && compute_eigenfunctions) ? Vector{Any}(undef, nk) : nothing
+    Φo = compute_odd_eigenfunctions ? Vector{Any}(undef, nk) : nothing
 
     qdata = _q_values(domain.K, Pe; precision_policy=precision_policy, qc1=qc1, qc2=qc2)
 
@@ -344,9 +348,9 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
     nq = nk
     @assert nq == length(qdata.idx64) + length(qdata.idxbig) + length(qdata.idxHR)
 
-    passes = 1 + Int(compute_odd)
-    eigenfunction_passes = compute_eigenfunctions ? passes : 0
-    total = nq * (passes + eigenfunction_passes)
+    eigenpair_passes = 1 + Int(compute_odd)
+    eigenfunction_passes = Int(compute_eigenfunctions) + Int(compute_odd_eigenfunctions)
+    total = nq * (eigenpair_passes + eigenfunction_passes)
 
     # define one local advance
     p = show_progress && total > 0 ?

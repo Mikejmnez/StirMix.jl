@@ -60,6 +60,21 @@ end
         @test even_basis.bn === nothing
         @test even_basis.Bk === nothing
 
+        odd_coeff_basis = spectral_basis(:cos, 1.0, dom, 10;
+                                         show_progress=false,
+                                         compute_eigenfunctions=false,
+                                         compute_odd=true)
+        @test odd_coeff_basis.Φe === nothing
+        @test odd_coeff_basis.Φo === nothing
+        @test odd_coeff_basis.bn !== nothing
+        @test odd_coeff_basis.Bk !== nothing
+        @test all(k -> odd_coeff_basis.an[k] !== nothing, eachindex(dom.K))
+        @test all(k -> odd_coeff_basis.Ak[k] !== nothing, eachindex(dom.K))
+        @test all(k -> odd_coeff_basis.bn[k] !== nothing, eachindex(dom.K))
+        @test all(k -> odd_coeff_basis.Bk[k] !== nothing, eachindex(dom.K))
+        @test all(k -> length(odd_coeff_basis.bn[k]) == size(odd_coeff_basis.Bk[k], 2),
+                  eachindex(dom.K))
+
         float64_progress_basis = redirect_stdout(devnull) do
             redirect_stderr(devnull) do
                 spectral_basis(:cos, 1.0, dom, 10;
@@ -284,6 +299,7 @@ end
 
     @testset "explicit evolution coefficient reconstruction" begin
         gamma = ones(5)
+        gamma_o = [0.5, -0.25, 0.125, -0.0625]
         ccoeffs = ones(ComplexF64, length(dom.K))
         tvals = [0.1]
 
@@ -301,6 +317,20 @@ end
                                      qc2=1.0e9,
                                      compute_eigenfunctions=false,
                                      compute_odd=false)
+        basis_odd_with_phi = spectral_basis(:cos, 10.0, dom, 4;
+                                            show_progress=false,
+                                            precision_policy=:mixed,
+                                            qc1=0.0,
+                                            qc2=1.0e9,
+                                            compute_eigenfunctions=true,
+                                            compute_odd=true)
+        basis_odd_coeff = spectral_basis(:cos, 10.0, dom, 4;
+                                         precision_policy=:mixed,
+                                         show_progress=false,
+                                         qc1=0.0,
+                                         qc2=1.0e9,
+                                         compute_eigenfunctions=false,
+                                         compute_odd=true)
 
         field_with_phi = solve_explicit(dom, basis_with_phi, gamma, nothing, ccoeffs,
                                         tvals, 10.0; show_progress=false)
@@ -311,20 +341,33 @@ end
                                           ccoeffs, tvals, 10.0;
                                           show_progress=false,
                                           reconstruction=:eigenfunctions)
+        field_odd_eigen = solve_explicit(dom, basis_odd_with_phi, gamma, gamma_o,
+                                         ccoeffs, tvals, 10.0;
+                                         show_progress=false,
+                                         reconstruction=:eigenfunctions)
+        field_odd_coeff = solve_explicit(dom, basis_odd_coeff, gamma, gamma_o,
+                                         ccoeffs, tvals, 10.0;
+                                         show_progress=false)
 
         @test basis_coeff.Φe === nothing
         @test basis_coeff.Φo === nothing
         @test basis_coeff.bn === nothing
         @test basis_coeff.Bk === nothing
+        @test basis_odd_coeff.Φe === nothing
+        @test basis_odd_coeff.Φo === nothing
+        @test basis_odd_coeff.bn !== nothing
+        @test basis_odd_coeff.Bk !== nothing
         @test any(k -> eltype(basis_coeff.Ak[k]) === Complex{BigFloat},
+                  eachindex(dom.K))
+        @test any(k -> eltype(basis_odd_coeff.Bk[k]) === Complex{BigFloat},
                   eachindex(dom.K))
         @test field_coeff ≈ field_with_phi
         @test field_eigen_even ≈ field_coeff
-        @test_throws ArgumentError solve_explicit(dom, basis_coeff, gamma, ones(4),
+        @test field_odd_coeff ≈ field_odd_eigen
+        @test_throws ArgumentError solve_explicit(dom, basis_coeff, gamma, gamma_o,
                                                   ccoeffs, tvals, 10.0;
-                                                  show_progress=false,
-                                                  reconstruction=:coefficients)
-        @test_throws ArgumentError solve_explicit(dom, basis_with_phi, gamma, ones(4),
+                                                  show_progress=false)
+        @test_throws ArgumentError solve_explicit(dom, basis_with_phi, gamma, gamma_o,
                                                   ccoeffs, tvals, 10.0;
                                                   show_progress=false,
                                                   reconstruction=:eigenfunctions)

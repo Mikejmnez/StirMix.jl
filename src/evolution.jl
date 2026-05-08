@@ -11,10 +11,19 @@ function _require_basis_eigenfunctions(basis)
 end
 
 
+function _require_basis_odd_coefficients(basis)
+    (basis.Bk === nothing || basis.bn === nothing) &&
+        throw(ArgumentError("basis must include odd coefficient data; call spectral_basis(...; compute_odd=true)"))
+
+    return nothing
+end
+
+
 function _require_basis_odd_eigenfunctions(basis)
     _require_basis_eigenfunctions(basis)
+    _require_basis_odd_coefficients(basis)
 
-    (basis.Φo === nothing || basis.Bk === nothing || basis.bn === nothing) &&
+    basis.Φo === nothing &&
         throw(ArgumentError("basis must include odd eigenfunctions; call spectral_basis(...; compute_eigenfunctions=true, compute_odd=true)"))
 
     return nothing
@@ -103,14 +112,14 @@ function _sine_y_basis(y::AbstractVector, R::Integer)
     return B
 end
 
-function _prepare_coefficient_mode_work_point(dom, basis, γ, Pe, k)
+function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k)
     Ak = basis.Ak[k]
 
     R, Nn = size(Ak)
     Kk = dom.K[k]
+    βshift = im * (Float64(basis.β0) / 2) * Kk * Float64(Pe)
 
     λ = ComplexF64.(basis.an[k])
-    βshift = im * (Float64(basis.β0) / 2) * Kk * Float64(Pe)
     @. λ = λ / 4 + Kk^2 + βshift
 
     Nuse = min(R, length(γ))
@@ -134,17 +143,61 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, Pe, k)
 
     tail = cosine_tail_data(dom.y, γ, Nn)
 
+    Bk = nothing
+    λ_o = nothing
+    projection_o = nothing
+    By_o = nothing
+    e_o = nothing
+    modal_o = nothing
+    coeff_y_o = nothing
+    f_o = nothing
+    tail_o = nothing
+
+    if γ_o !== nothing
+        Bk = basis.Bk[k]
+        R_o, Nno = size(Bk)
+
+        λ_o = ComplexF64.(basis.bn[k])
+        @. λ_o = λ_o / 4 + Kk^2 + βshift
+
+        Nuse_o = min(R_o, length(γ_o))
+        γlow_o = @view γ_o[1:Nuse_o]
+
+        Tproj_o = promote_type(eltype(Bk), eltype(γ_o))
+        projection_o = Vector{Tproj_o}(undef, Nno)
+        if Nuse_o > 0
+            mul!(projection_o, transpose(view(Bk, 1:Nuse_o, :)), γlow_o)
+        else
+            fill!(projection_o, zero(Tproj_o))
+        end
+
+        By_o = _sine_y_basis(dom.y, R_o)
+        Tfield_o = promote_type(eltype(By_o), eltype(projection_o))
+
+        e_o = Vector{ComplexF64}(undef, Nno)
+        modal_o = similar(projection_o)
+        coeff_y_o = Vector{Tproj_o}(undef, R_o)
+        f_o = Vector{Tfield_o}(undef, length(dom.y))
+
+        tail_o = sine_tail_data(dom.y, γ_o, R_o)
+    end
+
     return (Ak=Ak, λ=λ, projection=projection, By=By, e=e,
-            modal=modal, coeff_y=coeff_y, f=f, tail=tail)
+            modal=modal, coeff_y=coeff_y, f=f, tail=tail,
+            Bk=Bk, λ_o=λ_o, projection_o=projection_o, By_o=By_o,
+            e_o=e_o, modal_o=modal_o, coeff_y_o=coeff_y_o, f_o=f_o,
+            tail_o=tail_o)
 end
 
 
-function _prepare_coefficient_mode_work(dom, basis, γ, Pe)
+function _prepare_coefficient_mode_work(dom, basis, γ, γ_o, Pe)
+    γ_o !== nothing && _require_basis_odd_coefficients(basis)
+
     nk = length(dom.K)
     work = Vector{Any}(undef, nk)
 
     for k in 1:nk
-        work[k] = _prepare_coefficient_mode_work_point(dom, basis, γ, Pe, k)
+        work[k] = _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k)
     end
 
     return work
@@ -326,16 +379,36 @@ function _solve_explicit_time_coefficients!(T, it, t, spectrum, work,
         mul!(wk.f, wk.By, wk.coeff_y)
         _add_tail!(wk.f, wk.tail, t64, Kk)
 
+        if wk.projection_o !== nothing
+            @. wk.e_o = exp(-t64 * wk.λ_o)
+            @. wk.modal_o = wk.projection_o * wk.e_o
+            mul!(wk.coeff_y_o, wk.Bk, wk.modal_o)
+            mul!(wk.f_o, wk.By_o, wk.coeff_y_o)
+            _add_tail!(wk.f_o, wk.tail_o, t64, Kk)
+        end
+
         phase0 = Ccoeffs[k] * cis(Kk * x0)
         col = @view spectrum[:, k]
         if _irfft_self_conjugate_mode(k, nx)
-            @inbounds @simd for iy in 1:ny
-                col[iy] = nx * real(ComplexF64(wk.f[iy] * phase0))
+            if wk.projection_o !== nothing
+                @inbounds @simd for iy in 1:ny
+                    col[iy] = nx * real(ComplexF64((wk.f[iy] + wk.f_o[iy]) * phase0))
+                end
+            else
+                @inbounds @simd for iy in 1:ny
+                    col[iy] = nx * real(ComplexF64(wk.f[iy] * phase0))
+                end
             end
         else
             scale = nx / 2
-            @inbounds @simd for iy in 1:ny
-                col[iy] = scale * ComplexF64(wk.f[iy] * phase0)
+            if wk.projection_o !== nothing
+                @inbounds @simd for iy in 1:ny
+                    col[iy] = scale * ComplexF64((wk.f[iy] + wk.f_o[iy]) * phase0)
+                end
+            else
+                @inbounds @simd for iy in 1:ny
+                    col[iy] = scale * ComplexF64(wk.f[iy] * phase0)
+                end
             end
         end
     end
@@ -350,9 +423,6 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
                         parallel::Bool=true,
                         reconstruction::Symbol=:coefficients)
     _validate_reconstruction(reconstruction)
-    if reconstruction === :coefficients && γ_o !== nothing
-        throw(ArgumentError("γ_o is currently supported only with reconstruction=:eigenfunctions"))
-    end
 
     nt = length(tvals)
     ny = length(dom.y)
@@ -364,6 +434,8 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
     x0 = dom.x[1]
     if reconstruction === :eigenfunctions
         γ_o === nothing ? _require_basis_eigenfunctions(basis) : _require_basis_odd_eigenfunctions(basis)
+    elseif γ_o !== nothing
+        _require_basis_odd_coefficients(basis)
     end
 
     # define progressmeter instance
@@ -404,7 +476,7 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
             tasks = map(chunks) do chunk
                 Threads.@spawn begin
                     if reconstruction === :coefficients
-                        local_work = _prepare_coefficient_mode_work(dom, basis, γ, Pe)
+                        local_work = _prepare_coefficient_mode_work(dom, basis, γ, γ_o, Pe)
                     else
                         local_tails, local_work, local_otails = _prepare_mode_work(dom, basis, γ, γ_o)
                     end
@@ -431,7 +503,7 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
             _fetch_all_tasks(tasks)
         else
             if reconstruction === :coefficients
-                work = _prepare_coefficient_mode_work(dom, basis, γ, Pe)
+                work = _prepare_coefficient_mode_work(dom, basis, γ, γ_o, Pe)
             else
                 tails, work, otails = _prepare_mode_work(dom, basis, γ, γ_o)
             end
