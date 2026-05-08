@@ -235,7 +235,7 @@ end
         parallel_field = solve_explicit(dom, basis, gamma, nothing, ccoeffs, tvals, 1.0;
                                         parallel=true, show_progress=false)
         coefficient_field = solve_explicit(dom, basis, gamma, nothing, ccoeffs, tvals, 1.0;
-                                           reconstruction=:coefficients, show_progress=false)
+                                           show_progress=false)
 
         coefficient_basis = spectral_basis(:cos, 1.0, dom, 10;
                                            show_progress=false,
@@ -244,8 +244,7 @@ end
                                            compute_odd=false)
         coefficient_only_field = solve_explicit(dom, coefficient_basis, gamma, nothing,
                                                 ccoeffs, tvals, 1.0;
-                                                show_progress=false,
-                                                reconstruction=:coefficients)
+                                                show_progress=false)
 
         no_progress_field, no_progress_output = capture_stderr() do
             solve_explicit(dom, basis, gamma, nothing, ccoeffs, progress_tvals, 1.0;
@@ -278,13 +277,6 @@ end
         @test coefficient_only_field ≈ field
         @test coefficient_basis.Φe === nothing
         @test coefficient_basis.bn === nothing
-        @test_throws ArgumentError solve_explicit(dom, coefficient_basis, gamma, nothing,
-                                                  ccoeffs, tvals, 1.0; 
-                                                  reconstruction=:eigenfunctions)
-        @test_throws ArgumentError solve_explicit(dom, basis, gamma, ccoeffs, nothing,
-                                                  tvals, 1.0;
-                                                  show_progress=false,
-                                                  reconstruction=:unknown)
         @test isempty(no_progress_output)
         @test occursin("Computing time-evolving solution", progress_output)
         @test !occursin("aborted", lowercase(progress_output))
@@ -297,7 +289,7 @@ end
         @test !occursin("aborted", lowercase(progress_avg_output))
     end
 
-    @testset "explicit evolution coefficient reconstruction" begin
+    @testset "explicit evolution" begin
         gamma = ones(5)
         gamma_o = [0.5, -0.25, 0.125, -0.0625]
         ccoeffs = ones(ComplexF64, length(dom.K))
@@ -335,16 +327,10 @@ end
         field_with_phi = solve_explicit(dom, basis_with_phi, gamma, nothing, ccoeffs,
                                         tvals, 10.0; show_progress=false)
         field_coeff = solve_explicit(dom, basis_coeff, gamma, nothing, ccoeffs,
-                                     tvals, 10.0; show_progress=false,
-                                     reconstruction=:coefficients)
-        field_eigen_even = solve_explicit(dom, basis_with_phi, gamma, nothing,
-                                          ccoeffs, tvals, 10.0;
-                                          show_progress=false,
-                                          reconstruction=:eigenfunctions)
-        field_odd_eigen = solve_explicit(dom, basis_odd_with_phi, gamma, gamma_o,
-                                         ccoeffs, tvals, 10.0;
-                                         show_progress=false,
-                                         reconstruction=:eigenfunctions)
+                                     tvals, 10.0; show_progress=false)
+        field_odd_with_phi = solve_explicit(dom, basis_odd_with_phi, gamma, gamma_o,
+                                            ccoeffs, tvals, 10.0;
+                                            show_progress=false)
         field_odd_coeff = solve_explicit(dom, basis_odd_coeff, gamma, gamma_o,
                                          ccoeffs, tvals, 10.0;
                                          show_progress=false)
@@ -362,15 +348,10 @@ end
         @test any(k -> eltype(basis_odd_coeff.Bk[k]) === Complex{BigFloat},
                   eachindex(dom.K))
         @test field_coeff ≈ field_with_phi
-        @test field_eigen_even ≈ field_coeff
-        @test field_odd_coeff ≈ field_odd_eigen
+        @test field_odd_coeff ≈ field_odd_with_phi
         @test_throws ArgumentError solve_explicit(dom, basis_coeff, gamma, gamma_o,
                                                   ccoeffs, tvals, 10.0;
                                                   show_progress=false)
-        @test_throws ArgumentError solve_explicit(dom, basis_with_phi, gamma, gamma_o,
-                                                  ccoeffs, tvals, 10.0;
-                                                  show_progress=false,
-                                                  reconstruction=:eigenfunctions)
     end
     @testset "flow decomposition comparison: predetermined vs prescribed" begin
         Nx=8
@@ -441,10 +422,13 @@ end
         c0, ce, co = normal_mode_decomposition(f, dom.x; Lx=2*L*π)
         Ccoeffs = vcat(c0/2, complex_x_coeffs(ce, co))
 
-        basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,compute_eigenfunctions=:true, compute_odd=:true)    
+        basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,
+                              compute_eigenfunctions=false, compute_odd=true)
         # check initial condition in y direction
-        T_serial = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe; show_progress=false,parallel=false, reconstruction=:eigenfunctions)
-        T_parallel = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe; show_progress=false, reconstruction=:eigenfunctions)
+        T_serial = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
+                                  show_progress=false, parallel=false)
+        T_parallel = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
+                                    show_progress=false)
 
         # check initial condition in y direction
         @test isapprox(T_serial[1,:,:], T_parallel[1,:,:]; atol=1e-7)
@@ -473,9 +457,12 @@ end
         c0, ce, co = normal_mode_decomposition(f, dom.x; Lx=2*L*π)
         Ccoeffs = vcat(c0/2, complex_x_coeffs(ce, co))
 
-        basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,compute_eigenfunctions=:true, compute_odd=:true)
-        T_serial = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe; show_progress=false,parallel=false, reconstruction=:eigenfunctions)
-        T_parallel = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe; show_progress=false, reconstruction=:eigenfunctions)
+        basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,
+                              compute_eigenfunctions=false, compute_odd=true)
+        T_serial = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
+                                  show_progress=false, parallel=false)
+        T_parallel = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
+                                    show_progress=false)
 
         # check initial condition in y direction
         @test isapprox(T_serial[1,:,:], T_parallel[1,:,:]; atol=1e-7)

@@ -21,16 +21,13 @@ export domain,
     reconstruct!,
     normal_mode_decomposition,
     spectral_basis,
-    precompute_x_phase,
     complex_x_coeffs,
     reconstruct_from_complex_coeffs,
     solve_explicit,
     prepare_mode_data_avg,
     prepare_explicit_avg,
-    prepare_mode_data,
     evolve_explicit_avg,
     time_resample,
-    reconstruct_x!,
     predefined_flow
 
 end
