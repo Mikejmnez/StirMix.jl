@@ -11,35 +11,33 @@ function _require_basis_eigenfunctions(basis)
 end
 
 
+function _require_basis_odd_eigenfunctions(basis)
+    _require_basis_eigenfunctions(basis)
+
+    (basis.Φo === nothing || basis.Bk === nothing || basis.bn === nothing) &&
+        throw(ArgumentError("basis must include odd eigenfunctions; call spectral_basis(...; compute_eigenfunctions=true, compute_odd=true)"))
+
+    return nothing
+end
+
+
 function _prepare_mode_work(dom, basis, γ, γ_o=nothing)
     _require_basis_eigenfunctions(basis)
+    has_odd = γ_o !== nothing
+    has_odd && _require_basis_odd_eigenfunctions(basis)
 
     nk = length(dom.K)
 
     etails  = Vector{Any}(undef, nk)
     work   = Vector{Any}(undef, nk)
-
-    if γ_o !== nothing
-        otails  = Vector{Any}(undef, nk)    
-    else
-        e_o = nothing
-        C_o = nothing
-        Umat_o = nothing
-        f_o = nothing
-        otails  = nothing   
-    end
+    otails = has_odd ? Vector{Any}(undef, nk) : nothing
 
     for k in 1:nk
         Φe = basis.Φe[k]
         Ak = basis.Ak[k]
         an = basis.an[k]
 
-        # this may be empty
-        Φo = basis.Φo[k]
-        Bk = basis.Bk[k]
-        bn = basis.bn[k]
-
-        ny, Nn = size(Φe) # same size as odd
+        ny, Nn = size(Φe)
 
         etails[k] = cosine_tail_data(dom.y, γ, Nn)
 
@@ -49,12 +47,26 @@ function _prepare_mode_work(dom, basis, γ, γ_o=nothing)
         Tf = promote_type(eltype(Umat), eltype(γ))
         f = Vector{Tf}(undef, ny)
 
-        if γ_o !== nothing
-            otails[k] = sine_tail_data(dom.y, γ_o, Nn)
-            e_o = Vector{eltype(bn)}(undef, Nn)
+        e_o = nothing
+        C_o = nothing
+        Umat_o = nothing
+        f_o = nothing
+
+        if has_odd
+            Φo = basis.Φo[k]
+            Bk = basis.Bk[k]
+            bn = basis.bn[k]
+
+            ny_o, Nno = size(Φo)
+            ny_o == ny ||
+                throw(DimensionMismatch("odd and even eigenfunctions must use the same y grid"))
+
+            otails[k] = sine_tail_data(dom.y, γ_o, Nno)
+            e_o = Vector{eltype(bn)}(undef, Nno)
             C_o = similar(Bk)
-            Umat_o = Matrix{promote_type(eltype(Φo), eltype(Bk), eltype(bn))}(undef, ny, Nn)
-            f_o = Vector{Tf}(undef, ny)
+            Umat_o = Matrix{promote_type(eltype(Φo), eltype(Bk), eltype(bn))}(undef, ny, Nno)
+            Tfo = promote_type(eltype(Umat_o), eltype(γ_o))
+            f_o = Vector{Tfo}(undef, ny)
         end
 
         work[k] = (e=e, C=C, U=Umat, f=f, e_o=e_o, C_o=C_o, U_o=Umat_o, f_o=f_o)
@@ -210,15 +222,12 @@ function _solve_explicit_time!(T, it, t, spectrum, tails, work, otails,
                                dom, basis, γ, γ_o, Ccoeffs, Pe,
                                x0, nx, ny, nk)
     fill!(spectrum, 0)
+    has_odd = γ_o !== nothing
 
     for k in 1:nk
         Φe = basis.Φe[k]
         Ak = basis.Ak[k]
         an = basis.an[k]
-
-        Φo = basis.Φo[k]
-        Bk = basis.Bk[k]
-        bn = basis.bn[k]
 
         Kk = dom.K[k]
 
@@ -227,27 +236,30 @@ function _solve_explicit_time!(T, it, t, spectrum, tails, work, otails,
         Umat = work[k].U
         f = work[k].f
 
-        # here work odd pairs
-        e_o = work[k].e_o
-        C_o = work[k].C_o
-        Umat_o = work[k].U_o
-        f_o = work[k].f_o
-
         m_tail, Atail, γtail, tmp = tails[k]
-
-        m_otail, Btail, γotail, otmp = otails[k]
 
         e .= exp.(-t .* ((an ./ 4) .+ Kk^2 .+ (im * (basis.β0/2) * Kk * Pe)))
         C .= Ak .* reshape(e, 1, :)
         mul!(Umat, Φe, transpose(C))
 
-        e_o .= exp.(-t .* ((bn ./ 4) .+ Kk^2 .+ (im * (basis.β0/2) * Kk * Pe)))
-        C_o .= Bk .* reshape(e_o, 1, :)
-        mul!(Umat_o, Φo, transpose(C_o))
-
         reconstruct!(f, Umat, γ, Atail, γtail, m_tail, tmp, t, Kk)
 
-        if γ_o !== nothing
+        if has_odd
+            Φo = basis.Φo[k]
+            Bk = basis.Bk[k]
+            bn = basis.bn[k]
+
+            e_o = work[k].e_o
+            C_o = work[k].C_o
+            Umat_o = work[k].U_o
+            f_o = work[k].f_o
+
+            m_otail, Btail, γotail, otmp = otails[k]
+
+            e_o .= exp.(-t .* ((bn ./ 4) .+ Kk^2 .+ (im * (basis.β0/2) * Kk * Pe)))
+            C_o .= Bk .* reshape(e_o, 1, :)
+            mul!(Umat_o, Φo, transpose(C_o))
+
             reconstruct!(f_o, Umat_o, γ_o, Btail, γotail, m_otail, otmp, t, Kk)
         end
 
@@ -255,13 +267,27 @@ function _solve_explicit_time!(T, it, t, spectrum, tails, work, otails,
         phase0 = Ccoeffs[k] * cis(Kk * x0)
         col = @view spectrum[:, k]
         if _irfft_self_conjugate_mode(k, nx)
-            @inbounds @simd for iy in 1:ny
-                col[iy] = nx * real(ComplexF64((f[iy] + f_o[iy]) * phase0))
+            if has_odd
+                f_o = work[k].f_o
+                @inbounds @simd for iy in 1:ny
+                    col[iy] = nx * real(ComplexF64((f[iy] + f_o[iy]) * phase0))
+                end
+            else
+                @inbounds @simd for iy in 1:ny
+                    col[iy] = nx * real(ComplexF64(f[iy] * phase0))
+                end
             end
         else
             scale = nx / 2
-            @inbounds @simd for iy in 1:ny
-                col[iy] = scale * ComplexF64((f[iy] + f_o[iy]) * phase0)
+            if has_odd
+                f_o = work[k].f_o
+                @inbounds @simd for iy in 1:ny
+                    col[iy] = scale * ComplexF64((f[iy] + f_o[iy]) * phase0)
+                end
+            else
+                @inbounds @simd for iy in 1:ny
+                    col[iy] = scale * ComplexF64(f[iy] * phase0)
+                end
             end
         end
     end
@@ -324,6 +350,9 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
                         parallel::Bool=true,
                         reconstruction::Symbol=:coefficients)
     _validate_reconstruction(reconstruction)
+    if reconstruction === :coefficients && γ_o !== nothing
+        throw(ArgumentError("γ_o is currently supported only with reconstruction=:eigenfunctions"))
+    end
 
     nt = length(tvals)
     ny = length(dom.y)
@@ -333,7 +362,9 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
     T = zeros(Float64, nt, ny, nx)
 
     x0 = dom.x[1]
-    reconstruction === :eigenfunctions && _require_basis_eigenfunctions(basis)
+    if reconstruction === :eigenfunctions
+        γ_o === nothing ? _require_basis_eigenfunctions(basis) : _require_basis_odd_eigenfunctions(basis)
+    end
 
     # define progressmeter instance
     p = show_progress && nt > 0 ?

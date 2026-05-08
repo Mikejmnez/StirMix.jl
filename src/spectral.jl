@@ -98,23 +98,23 @@ end
 """
     sine_tail_data(y, γ, Nn)
 
-Build the sine basis and coefficient views for the tail modes m = Nn:Mmax,
-where Mmax = length(γ) - 1.
+Build the sine basis and coefficient views for the tail modes m = Nn+1:Mmax,
+where Mmax = length(γ).
 
 Returns `(m_tail, Btail, γtail, tmp)` where:
 
-- `m_tail` : vector of mode indices Nn:Mmax
+- `m_tail` : vector of mode indices Nn+1:Mmax
 - `Btail`  : sine basis matrix with columns sin.(2m*y)
-- `γtail`  : view into γ corresponding to modes Nn:Mmax
+- `γtail`  : view into γ corresponding to modes Nn+1:Mmax
 - `tmp`    : work array similar to γtail
 
-If `Mmax < Nn`, returns empty objects of compatible size.
+If `Mmax < Nn + 1`, returns empty objects of compatible size.
 """
 function sine_tail_data(y::AbstractVector, γ::AbstractVector, Nn::Integer)
-    Mmax = length(γ) - 1
+    Mmax = length(γ)
 
-    if Mmax >= Nn
-        m_tail = collect(Nn:Mmax)                  # modes m = Nn, ..., Mmax
+    if Mmax >= Nn + 1
+        m_tail = collect((Nn + 1):Mmax)            # modes m = Nn+1, ..., Mmax
         Mt = length(m_tail)
         ny = length(y)
 
@@ -123,7 +123,7 @@ function sine_tail_data(y::AbstractVector, γ::AbstractVector, Nn::Integer)
             @inbounds Btail[:, j] .= sin.(2m .* y)
         end
 
-        γtail = @view γ[(Nn+1):(Mmax+1)]           # γ[mode m] stored at index m+1
+        γtail = @view γ[(Nn+1):Mmax]               # γ[mode m] stored at index m
         tmp = similar(γtail)
     else
         m_tail = Int[]

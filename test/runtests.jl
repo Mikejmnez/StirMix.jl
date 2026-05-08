@@ -307,6 +307,10 @@ end
         field_coeff = solve_explicit(dom, basis_coeff, gamma, nothing, ccoeffs,
                                      tvals, 10.0; show_progress=false,
                                      reconstruction=:coefficients)
+        field_eigen_even = solve_explicit(dom, basis_with_phi, gamma, nothing,
+                                          ccoeffs, tvals, 10.0;
+                                          show_progress=false,
+                                          reconstruction=:eigenfunctions)
 
         @test basis_coeff.Φe === nothing
         @test basis_coeff.Φo === nothing
@@ -315,6 +319,15 @@ end
         @test any(k -> eltype(basis_coeff.Ak[k]) === Complex{BigFloat},
                   eachindex(dom.K))
         @test field_coeff ≈ field_with_phi
+        @test field_eigen_even ≈ field_coeff
+        @test_throws ArgumentError solve_explicit(dom, basis_coeff, gamma, ones(4),
+                                                  ccoeffs, tvals, 10.0;
+                                                  show_progress=false,
+                                                  reconstruction=:coefficients)
+        @test_throws ArgumentError solve_explicit(dom, basis_with_phi, gamma, ones(4),
+                                                  ccoeffs, tvals, 10.0;
+                                                  show_progress=false,
+                                                  reconstruction=:eigenfunctions)
     end
     @testset "flow decomposition comparison: predetermined vs prescribed" begin
         Nx=8
@@ -351,7 +364,7 @@ end
         @test γ_otail[1] === γ_o[NMax+1]
 
         @test isapprox(Atail[:, 1], cos.(NMax*2*dom.y); atol = 1e-4, rtol = 1e-4)
-        @test isapprox(Btail[:, 1], sin.(NMax*2*dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Btail[:, 1], sin.((NMax+1)*2*dom.y); atol = 1e-4, rtol = 1e-4)
 
         @test isapprox(Atail[:, 1], cos.(m_etail[1]*2*dom.y); atol = 1e-4, rtol = 1e-4)
         @test isapprox(Btail[:, 1], sin.(m_otail[1]*2*dom.y); atol = 1e-4, rtol = 1e-4)
