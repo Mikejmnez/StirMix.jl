@@ -147,7 +147,7 @@ end
         avg_field = evolve_explicit_avg(dom, prep, ccoeffs, [0.1]; 
                                         show_progress=false)
 
-        U, _, _ = predefined_flow(:cos, dom)
+        U, _, _ = StirMix.predefined_flow(:cos, dom)
         symbol_progress_prep = redirect_stdout(devnull) do
             redirect_stderr(devnull) do
                 prepare_explicit_avg(dom, :cos, gamma, 1.0, 10;
@@ -171,7 +171,7 @@ end
 
     @testset "averaged preparation parallel chunks" begin
         gamma = ones(5)
-        U, _, _ = predefined_flow(:cos, dom)
+        U, _, _ = StirMix.predefined_flow(:cos, dom)
 
         serial_prep, serial_output = capture_stderr() do
             prepare_explicit_avg(dom, U, gamma, 1.0, 10;
@@ -300,8 +300,9 @@ end
         Nx=8
         Ny=28
         dom = domain(1.0, 1, Nx, Ny)
-        U, β0_1, β_1 = predefined_flow(:poiseuille, dom)
-        β0_2, β_2, _ = normal_mode_decomposition(U, dom.y; Lx=Ny)
+        U, β0_1, β_1 = StirMix.predefined_flow(:poiseuille, dom)
+        β0_2, β_2, _ = StirMix.normal_mode_decomposition(U, dom.y; Lx=Ny)
+        # must finish test here
     end
 
     @testset "tail normal modes" begin 
@@ -316,15 +317,15 @@ end
         # ==================================
         σ2_y0 = 1/40
         g = @. exp(-(((dom.y-pi/4)/(sqrt(2*σ2_y0))).^2))
-        χ_0, χ_e, γ_o = normal_mode_decomposition(g, 2*dom.y; Lx=2π)
+        χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(g, 2*dom.y; Lx=2π)
         γ_e = vcat(χ_0, χ_e);
         
         NMax = 10 # Tail data begins with the following normal mode
         Nnm = length(γ_e) - NMax # how many tail cosine modes there will be
         NNmo = length(γ_o) - NMax
 
-        m_etail, Atail, γ_etail, _ = cosine_tail_data(dom.y, γ_e, NMax)
-        m_otail, Btail, γ_otail, _ = sine_tail_data(dom.y, γ_o, NMax)
+        m_etail, Atail, γ_etail, _ = StirMix.cosine_tail_data(dom.y, γ_e, NMax)
+        m_otail, Btail, γ_otail, _ = StirMix.sine_tail_data(dom.y, γ_o, NMax)
 
         @test size(Atail) == (length(dom.y), Nnm)
         @test γ_etail[1] === γ_e[NMax+1]
@@ -357,13 +358,13 @@ end
         # ==================================
         σ2_y0 = 1/40
         g = @. exp(-(((dom.y-pi/4)/(sqrt(2*σ2_y0))).^2))
-        χ_0, χ_e, γ_o = normal_mode_decomposition(g, 2*dom.y; Lx=2π)
+        χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(g, 2*dom.y; Lx=2π)
         γ_e = vcat(χ_0, χ_e)
 
         σ2_0 = 100
         f = @. 1*exp(-(((dom.x + 0)/(sqrt(2*σ2_0))).^2))
-        c0, ce, co = normal_mode_decomposition(f, dom.x; Lx=2*L*π)
-        Ccoeffs = vcat(c0/2, complex_x_coeffs(ce, co))
+        c0, ce, co = StirMix.normal_mode_decomposition(f, dom.x; Lx=2*L*π)
+        Ccoeffs = vcat(c0/2, StirMix.complex_x_coeffs(ce, co))
 
         basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false, compute_odd=true)
         # check initial condition in y direction
@@ -391,13 +392,13 @@ end
         # ==================================
         σ2_y0 = 1000
         g = @. exp(-(((dom.y-pi/4)/(sqrt(2*σ2_y0))).^2))
-        χ_0, χ_e, γ_o = normal_mode_decomposition(g, 2*dom.y; Lx=2π)
+        χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(g, 2*dom.y; Lx=2π)
         γ_e = vcat(χ_0, χ_e)
 
         σ2_0 = 1/100
         f = @. 1*exp(-(((dom.x + 0)/(sqrt(2*σ2_0))).^2))
-        c0, ce, co = normal_mode_decomposition(f, dom.x; Lx=L)
-        Ccoeffs = vcat(c0/2, complex_x_coeffs(ce, co))
+        c0, ce, co = StirMix.normal_mode_decomposition(f, dom.x; Lx=L)
+        Ccoeffs = vcat(c0/2, StirMix.complex_x_coeffs(ce, co))
 
         basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,
                               compute_odd=true)
