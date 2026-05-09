@@ -18,8 +18,6 @@ struct SpectralBasis
     bn
     Ak
     Bk
-    Φe
-    Φo
 end
 
 struct AvgModeWork{T}

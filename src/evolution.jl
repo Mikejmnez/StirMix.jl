@@ -412,7 +412,6 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
                                   qc1=qc1, qc2=qc2,
                                   parallel=parallel,
                                   show_progress=show_progress,
-                                  compute_eigenfunctions=false,
                                   compute_odd=false, 
                                   sweep_chunk_size=sweep_chunk_size) # this is not true always
 
@@ -438,7 +437,6 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
                                   qc1=qc1, qc2=qc2,
                                   parallel=parallel,
                                   show_progress=show_progress,
-                                  compute_eigenfunctions=false,
                                   compute_odd=false, 
                                   sweep_chunk_size=sweep_chunk_size)
 

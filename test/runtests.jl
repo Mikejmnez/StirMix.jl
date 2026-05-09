@@ -33,45 +33,29 @@ end
 @testset "StirMix.jl" begin
     dom = domain(pi, 1, 8, 8)
 
-    @testset "spectral basis eigenfunction toggle" begin
+    @testset "spectral basis toggle" begin
         basis = spectral_basis(:cos, 1.0, dom, 10; 
-                               show_progress=false,
-                               compute_eigenfunctions=true)
+                               show_progress=false)
         @test length(basis.qs) == length(dom.K)
-        @test basis.Φe !== nothing
-        @test basis.Φo === nothing
-        @test all(x -> x !== nothing, basis.Φe)
 
         mixed_basis = spectral_basis(:cos, 1000.0, dom, 10;
                                      show_progress=false,
                                      precision_policy=:mixed, 
                                      qc1=5000, qc2=12000)
-        @test mixed_basis.Φe === nothing
-        @test mixed_basis.Φo === nothing
-        @test mixed_basis.bn === nothing
-        @test mixed_basis.Bk === nothing
         @test any(q -> q isa ComplexF64, mixed_basis.qs)
         @test any(q -> q isa Complex{BigFloat}, mixed_basis.qs)
 
         even_basis = spectral_basis(:cos, 1.0, dom, 10;
                                     show_progress=false)
-        @test even_basis.Φe === nothing
-        @test even_basis.Φo === nothing
-        @test even_basis.bn === nothing
-        @test even_basis.Bk === nothing
 
         odd_coeff_basis = spectral_basis(:cos, 1.0, dom, 10;
                                          show_progress=false,
-                                         compute_eigenfunctions=false,
                                          compute_odd=true)
-        @test odd_coeff_basis.Φe === nothing
-        @test odd_coeff_basis.Φo === nothing
-        @test odd_coeff_basis.bn !== nothing
-        @test odd_coeff_basis.Bk !== nothing
         @test all(k -> odd_coeff_basis.an[k] !== nothing, eachindex(dom.K))
         @test all(k -> odd_coeff_basis.Ak[k] !== nothing, eachindex(dom.K))
         @test all(k -> odd_coeff_basis.bn[k] !== nothing, eachindex(dom.K))
         @test all(k -> odd_coeff_basis.Bk[k] !== nothing, eachindex(dom.K))
+
         @test all(k -> length(odd_coeff_basis.bn[k]) == size(odd_coeff_basis.Bk[k], 2),
                   eachindex(dom.K))
 
@@ -99,14 +83,12 @@ end
             spectral_basis(:cos, 1.0, dom, 10;
                            precision_policy=:float64,
                            parallel=false,
-                           compute_eigenfunctions=true,
                            compute_odd=true,
                            sweep_chunk_size=Int32(2))
         end
         parallel_basis, parallel_output = capture_stderr() do
             spectral_basis(:cos, 1.0, dom, 10;
                            precision_policy=:float64,
-                           compute_eigenfunctions=true,
                            compute_odd=true,
                            sweep_chunk_size=2)
         end
@@ -116,8 +98,6 @@ end
         @test all(k -> serial_basis.Ak[k] == parallel_basis.Ak[k], eachindex(dom.K))
         @test all(k -> serial_basis.bn[k] == parallel_basis.bn[k], eachindex(dom.K))
         @test all(k -> serial_basis.Bk[k] == parallel_basis.Bk[k], eachindex(dom.K))
-        @test all(k -> serial_basis.Φe[k] == parallel_basis.Φe[k], eachindex(dom.K))
-        @test all(k -> serial_basis.Φo[k] == parallel_basis.Φo[k], eachindex(dom.K))
         @test isempty(serial_output) || occursin("Computing spectral basis", serial_output)
         @test isempty(parallel_output) || occursin("Computing spectral basis", parallel_output)
         @test !occursin("aborted", lowercase(serial_output))
@@ -129,7 +109,6 @@ end
                                       parallel=false,
                                       sweep_chunk_size=2,
                                       show_progress=false,
-                                      compute_eigenfunctions=true,
                                       compute_odd=true)
         mixed_parallel = spectral_basis(:cos, 1000.0, dom, 10;
                                         precision_policy=:mixed,
@@ -137,13 +116,10 @@ end
                                         parallel=true,
                                         sweep_chunk_size=2,
                                         show_progress=false,
-                                        compute_eigenfunctions=true,
                                         compute_odd=true)
 
         @test mixed_serial.qs == mixed_parallel.qs
         @test any(q -> q isa Complex{BigFloat}, mixed_parallel.qs)
-        @test mixed_parallel.Φe !== nothing
-        @test mixed_parallel.Φo !== nothing
         @test all(k -> mixed_serial.an[k] == mixed_parallel.an[k], eachindex(dom.K))
         @test all(k -> mixed_serial.Ak[k] == mixed_parallel.Ak[k], eachindex(dom.K))
         @test all(k -> mixed_serial.bn[k] == mixed_parallel.bn[k], eachindex(dom.K))
@@ -240,7 +216,6 @@ end
         coefficient_basis = spectral_basis(:cos, 1.0, dom, 10;
                                            show_progress=false,
                                            precision_policy=:float64,
-                                           compute_eigenfunctions=false,
                                            compute_odd=false)
         coefficient_only_field = solve_explicit(dom, coefficient_basis, gamma, nothing,
                                                 ccoeffs, tvals, 1.0;
@@ -275,7 +250,6 @@ end
         @test parallel_field ≈ field
         @test coefficient_field ≈ field
         @test coefficient_only_field ≈ field
-        @test coefficient_basis.Φe === nothing
         @test coefficient_basis.bn === nothing
         @test isempty(no_progress_output)
         @test occursin("Computing time-evolving solution", progress_output)
@@ -295,60 +269,29 @@ end
         ccoeffs = ones(ComplexF64, length(dom.K))
         tvals = [0.1]
 
-        basis_with_phi = spectral_basis(:cos, 10.0, dom, 4;
-                                        show_progress=false,
-                                        precision_policy=:mixed,
-                                        qc1=0.0,
-                                        qc2=1.0e9,
-                                        compute_eigenfunctions=true,
-                                        compute_odd=false)
         basis_coeff = spectral_basis(:cos, 10.0, dom, 4;
                                      precision_policy=:mixed,
                                      show_progress=false,
                                      qc1=0.0,
                                      qc2=1.0e9,
-                                     compute_eigenfunctions=false,
                                      compute_odd=false)
-        basis_odd_with_phi = spectral_basis(:cos, 10.0, dom, 4;
-                                            show_progress=false,
-                                            precision_policy=:mixed,
-                                            qc1=0.0,
-                                            qc2=1.0e9,
-                                            compute_eigenfunctions=true,
-                                            compute_odd=true)
         basis_odd_coeff = spectral_basis(:cos, 10.0, dom, 4;
                                          precision_policy=:mixed,
                                          show_progress=false,
                                          qc1=0.0,
                                          qc2=1.0e9,
-                                         compute_eigenfunctions=false,
                                          compute_odd=true)
 
-        field_with_phi = solve_explicit(dom, basis_with_phi, gamma, nothing, ccoeffs,
-                                        tvals, 10.0; show_progress=false)
         field_coeff = solve_explicit(dom, basis_coeff, gamma, nothing, ccoeffs,
                                      tvals, 10.0; show_progress=false)
-        field_odd_with_phi = solve_explicit(dom, basis_odd_with_phi, gamma, gamma_o,
-                                            ccoeffs, tvals, 10.0;
-                                            show_progress=false)
         field_odd_coeff = solve_explicit(dom, basis_odd_coeff, gamma, gamma_o,
                                          ccoeffs, tvals, 10.0;
                                          show_progress=false)
 
-        @test basis_coeff.Φe === nothing
-        @test basis_coeff.Φo === nothing
-        @test basis_coeff.bn === nothing
-        @test basis_coeff.Bk === nothing
-        @test basis_odd_coeff.Φe === nothing
-        @test basis_odd_coeff.Φo === nothing
-        @test basis_odd_coeff.bn !== nothing
-        @test basis_odd_coeff.Bk !== nothing
         @test any(k -> eltype(basis_coeff.Ak[k]) === Complex{BigFloat},
                   eachindex(dom.K))
         @test any(k -> eltype(basis_odd_coeff.Bk[k]) === Complex{BigFloat},
                   eachindex(dom.K))
-        @test field_coeff ≈ field_with_phi
-        @test field_odd_coeff ≈ field_odd_with_phi
         @test_throws ArgumentError solve_explicit(dom, basis_coeff, gamma, gamma_o,
                                                   ccoeffs, tvals, 10.0;
                                                   show_progress=false)
@@ -422,13 +365,12 @@ end
         c0, ce, co = normal_mode_decomposition(f, dom.x; Lx=2*L*π)
         Ccoeffs = vcat(c0/2, complex_x_coeffs(ce, co))
 
-        basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,
-                              compute_eigenfunctions=false, compute_odd=true)
+        basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false, compute_odd=true)
         # check initial condition in y direction
         T_serial = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
                                   show_progress=false, parallel=false)
         T_parallel = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
-                                    show_progress=false)
+                                  show_progress=false)
 
         # check initial condition in y direction
         @test isapprox(T_serial[1,:,:], T_parallel[1,:,:]; atol=1e-7)
@@ -458,7 +400,7 @@ end
         Ccoeffs = vcat(c0/2, complex_x_coeffs(ce, co))
 
         basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,
-                              compute_eigenfunctions=false, compute_odd=true)
+                              compute_odd=true)
         T_serial = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
                                   show_progress=false, parallel=false)
         T_parallel = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
