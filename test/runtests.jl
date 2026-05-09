@@ -31,7 +31,7 @@ function capture_stderr(f)
 end
 
 @testset "StirMix.jl" begin
-    dom = domain(1.0, 1, 8, 8)
+    dom = domain(pi, 1, 8, 8)
 
     @testset "spectral basis eigenfunction toggle" begin
         basis = spectral_basis(:cos, 1.0, dom, 10; 
@@ -440,7 +440,7 @@ end
         Nx = 100
         Ny = 20
         M  = 1
-        L  = 1/pi
+        L  = 1
         dom = domain(L, M, Nx, Ny)
         tvals = range(0, .01, 2)
 
@@ -454,7 +454,7 @@ end
 
         σ2_0 = 1/100
         f = @. 1*exp(-(((dom.x + 0)/(sqrt(2*σ2_0))).^2))
-        c0, ce, co = normal_mode_decomposition(f, dom.x; Lx=2*L*π)
+        c0, ce, co = normal_mode_decomposition(f, dom.x; Lx=L)
         Ccoeffs = vcat(c0/2, complex_x_coeffs(ce, co))
 
         basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,

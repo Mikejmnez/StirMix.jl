@@ -35,7 +35,7 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k)
     Ak = basis.Ak[k]
 
     R, Nn = size(Ak)
-    Kk = dom.K[k]
+    Kk = 2π * dom.K[k]
     βshift = im * (Float64(basis.β0) / 2) * Kk * Float64(Pe)
 
     λ = ComplexF64.(basis.an[k])
@@ -166,7 +166,7 @@ function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe)
         ank = avals[k]
 
         Nn = length(ank)
-        Kk = dom.K[k]
+        Kk = 2π * dom.K[k]
         Tmode = promote_type(eltype(Akk), eltype(ank), eltype(γ),
                              typeof(βshift * Kk), typeof(Kk^2))
 
@@ -211,7 +211,7 @@ function _solve_explicit_time!(T, it, t, spectrum, work,
 
     for k in 1:nk
         wk = work[k]
-        Kk = dom.K[k]
+        Kk = 2π * dom.K[k]
 
         @. wk.e = exp(-t64 * wk.λ)
         @. wk.modal = wk.projection * wk.e
@@ -470,7 +470,7 @@ function _evolve_explicit_avg_time!(T, it, t, spec, work, dom, Ccoeffs, x0, nx)
         end
 
         # Big/complex arithmetic may happen above; FFTW boundary is here.
-        z = ComplexF64(favg * Ccoeffs[k] * cis(dom.K[k] * x0))
+        z = ComplexF64(favg * Ccoeffs[k] * cis(2π * dom.K[k] * x0))
 
         if _irfft_self_conjugate_mode(k, nx)
             spec[k] = nx * real(z)

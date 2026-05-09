@@ -43,7 +43,7 @@ end
 Convert cosine/sine Fourier coefficients in x into complex coefficients C
 such that
 
-    real(C[k] * exp(im*K[k]*x)) = ce[k]*cos(K[k]*x) + co[k]*sin(K[k]*x)
+    real(C[k] * exp(im* 2πK[k]*x)) = ce[k]*cos((2πK[k]*x) + co[k]*sin((2πK[k]*x)
 
 Hence:
     C[k] = ce[k] - im*co[k]
@@ -142,27 +142,25 @@ function _q_values(K::AbstractVector, Pe::Real;
                   precision_policy=:mixed, 
                   qc1::Union{Nothing,Real}=nothing, 
                   qc2::Union{Nothing,Real}=nothing)
-    absq = abs.(2 .* K .* Pe)
+    absq = abs.(2 .* (2π * K) .* Pe)
     if precision_policy === :mixed
         qc1 < qc2 || throw(ArgumentError("qc1 must be less than qc2; got qc1=$qc1, qc2=$qc2"))
         idx64  = findall(absq .< qc1)
         idxbig     = findall((absq .>= qc1) .& (absq .< qc2))
         idxHR = findall(absq .>= qc2)
 
-        qs64 = ComplexF64.(complex.(0.0, 2 .* K[idx64] .* Pe))
+        qs64 = ComplexF64.(complex.(0.0, 2 .* (2π * K[idx64]) .* Pe))
 
-        qsbig = complex.(
-            zero(BigFloat),
-            big(2) .* BigFloat.(K[idxbig]) .* BigFloat(Pe),
-        )
-        qsHR = ComplexF64.(complex.(0.0, 2 .* K[idxHR] .* Pe))
+        qsbig = complex.(zero(BigFloat), big(4π) .* BigFloat.(K[idxbig]) .* BigFloat(Pe))
+
+        qsHR = ComplexF64.(complex.(0.0, 2 .* (2π * K[idxHR]) .* Pe))
 
         return (; idx64, idxbig, idxHR, qs64, qsbig, qsHR)
 
     elseif precision_policy === :float64
 
         idx64 = collect(eachindex(K))
-        qs64 = ComplexF64.(complex.(0.0, 2 .* K .* Pe))
+        qs64 = ComplexF64.(complex.(0.0, 2 .* (2π * K).* Pe))
 
     else
         throw(ArgumentError(
