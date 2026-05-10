@@ -298,11 +298,13 @@ end
     end
     @testset "flow decomposition comparison: predetermined vs prescribed" begin
         Nx=8
-        Ny=28
-        dom = domain(1.0, 1, Nx, Ny)
+        Ny=100
+        dom = domain(pi, 1, Nx, Ny)
         U, β0_1, β_1 = StirMix.predefined_flow(:poiseuille, dom)
         β0_2, β_2, _ = StirMix.normal_mode_decomposition(U, dom.y; Lx=Ny)
         # must finish test here
+        @test isapprox(real(β0_1), real(β0_2); atol=1e-2, rtol=1e-2)
+        @test isapprox(real(β_1), real(β_2); atol=1e-2, rtol=1e-2)
     end
 
     @testset "tail normal modes" begin 
