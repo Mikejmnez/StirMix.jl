@@ -307,11 +307,26 @@ end
         @test isapprox(real(β_1), real(β_2); atol=1e-2, rtol=1e-2)
     end
 
+    @testset "odd flow decomposition Even periodic extension" begin
+        Nx = 8
+        Ny = 200
+        dom = domain(pi, 1, Nx, Ny)
+        # define purely odd flow field
+        U_linear = dom.y / π
+
+        U, α0, α = StirMix.flow_decomposition(U_linear,  dom)
+
+        @test round(α0/2, digits=1) === 0.5
+        @test maximum(round.(abs.(α[2:2:end]), digits=10)) === 0.0
+        @test minimum(round.(abs.(α[2:2:end]), digits=10)) === 0.0
+
+    end
+
     @testset "tail normal modes" begin 
         Nx = 20
         Ny = 200
         M  = 1
-        L  = 1/pi
+        L  = 1
         dom = domain(L, M, Nx, Ny)
 
         # ==================================
@@ -351,7 +366,7 @@ end
         Nx = 10
         Ny = 200
         M  = 1
-        L  = 1/pi
+        L  = 1
         dom = domain(L, M, Nx, Ny)
         tvals = range(0, .01, 2)
 
