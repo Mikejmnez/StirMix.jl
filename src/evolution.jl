@@ -396,16 +396,27 @@ function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
 end
 
 
-function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
+function prepare_explicit_avg(dom, U::AbstractVector, fy, Pe, Ns;
                               precision_policy=:float64, qc1::Union{Nothing,Real}=nothing,
                               qc2::Union{Nothing,Real}=nothing,
                               parallel::Bool=true,
                               show_progress::Bool=true, 
                               sweep_chunk_size::Union{Nothing,Integer}=nothing)
     Peabs = abs(Pe)
-    Nmax = length(γ)
 
-    _, β0, β = flow_decomposition(U, dom)
+    _, β0, β, even_extension = flow_decomposition(U, dom)
+
+    if even_extension
+        # flow is odd so need to do an even periodic extension
+        nfy = vcat(fy,fy)
+        χ_0, χ_e, _ = normal_mode_decomposition(nfy, 2*dom.y; Lx=2π)
+    else
+        χ_0, χ_e, _ = normal_mode_decomposition(fy, 2*dom.y; Lx=2π)
+    end
+
+    γ = vcat(χ_0, χ_e)
+    Nmax = length(γ) ÷ 2 # arbitrary but O(length(y)) 
+
     data = _collect_spectral_data(dom, Peabs, Ns, β;
                                   Nmax=Nmax,
                                   precision_policy=precision_policy,
@@ -413,7 +424,8 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
                                   parallel=parallel,
                                   show_progress=show_progress,
                                   compute_odd=false, 
-                                  sweep_chunk_size=sweep_chunk_size) # this is not true always
+                                  sweep_chunk_size=sweep_chunk_size, 
+                                  even_extension=even_extension) # this is not true always
 
     work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe)
 
@@ -421,16 +433,28 @@ function prepare_explicit_avg(dom, U::AbstractVector, γ, Pe, Ns;
 end
 
 
-function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
+function prepare_explicit_avg(dom, flow::Symbol, fy, Pe, Ns;
                               precision_policy=:float64, qc1::Union{Nothing,Real}=nothing,
                               qc2::Union{Nothing,Real}=nothing,
                               parallel::Bool=true,
                               show_progress::Bool=true, 
                               sweep_chunk_size::Union{Nothing,Integer}=nothing)
-    Peabs = abs(Pe)
-    Nmax = length(γ)
 
-    _, β0, β = flow_decomposition(flow, dom)
+    Peabs = abs(Pe)
+    _, β0, β, even_extension = flow_decomposition(flow, dom)
+    if even_extension
+        nfy = vcat(fy,fy)
+        ny = vcat(dom.y, pi .+ dom.y)
+        χ_0, χ_e, _ = normal_mode_decomposition(nfy, ny; Lx=2π)
+        γ = vcat(χ_0, χ_e) 
+        Nmax = length(γ)
+    else
+        χ_0, χ_e, _ = normal_mode_decomposition(fy, 2*dom.y; Lx=2π)
+        γ = vcat(χ_0, χ_e) 
+        Nmax = length(γ)÷2 # arbitrary but O(size of y)
+    end
+
+
     data = _collect_spectral_data(dom, Peabs, Ns, β;
                                   Nmax=Nmax,
                                   precision_policy=precision_policy,
@@ -438,7 +462,8 @@ function prepare_explicit_avg(dom, flow::Symbol, γ, Pe, Ns;
                                   parallel=parallel,
                                   show_progress=show_progress,
                                   compute_odd=false, 
-                                  sweep_chunk_size=sweep_chunk_size)
+                                  sweep_chunk_size=sweep_chunk_size,
+                                  even_extension=even_extension)
 
     work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe)
 

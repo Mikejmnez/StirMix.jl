@@ -32,6 +32,7 @@ end
 
 @testset "StirMix.jl" begin
     dom = domain(pi, 1, 8, 8)
+    fy = @. sin.(dom.y)
 
     @testset "spectral basis toggle" begin
         basis = spectral_basis(:cos, 1.0, dom, 10; 
@@ -140,23 +141,23 @@ end
                                show_progress=false)
         @test size(field) == (1, length(dom.y), length(dom.x))
 
-        prep = prepare_explicit_avg(dom, :cos, gamma, 1000.0, 10;
+        prep = prepare_explicit_avg(dom, :cos, fy, 1000.0, 10;
                                     precision_policy=:mixed,
                                     qc1=5000, qc2 = 15000,
                                     show_progress=false)
         avg_field = evolve_explicit_avg(dom, prep, ccoeffs, [0.1]; 
                                         show_progress=false)
 
-        U, _, _ = StirMix.predefined_flow(:cos, dom)
+        U, _, _, _ = StirMix.predefined_flow(:cos, dom)
         symbol_progress_prep = redirect_stdout(devnull) do
             redirect_stderr(devnull) do
-                prepare_explicit_avg(dom, :cos, gamma, 1.0, 10;
+                prepare_explicit_avg(dom, :cos, fy, 1.0, 10;
                                      precision_policy=:float64)
             end
         end
         vector_progress_prep = redirect_stdout(devnull) do
             redirect_stderr(devnull) do
-                prepare_explicit_avg(dom, U, gamma, 1.0, 10;
+                prepare_explicit_avg(dom, U, fy, 1.0, 10;
                                      precision_policy=:float64)
             end
         end
@@ -170,18 +171,17 @@ end
     end
 
     @testset "averaged preparation parallel chunks" begin
-        gamma = ones(5)
-        U, _, _ = StirMix.predefined_flow(:cos, dom)
+        U, _, _, _ = StirMix.predefined_flow(:cos, dom)
 
         serial_prep, serial_output = capture_stderr() do
-            prepare_explicit_avg(dom, U, gamma, 1.0, 10;
+            prepare_explicit_avg(dom, U, fy, 1.0, 10;
                                  precision_policy=:float64,
                                  parallel=false,
                                  show_progress=true,
                                  sweep_chunk_size=Int32(2))
         end
         parallel_prep, parallel_output = capture_stderr() do
-            prepare_explicit_avg(dom, :cos, gamma, 1.0, 10;
+            prepare_explicit_avg(dom, :cos, fy, 1.0, 10;
                                  precision_policy=:float64,
                                  parallel=true,
                                  show_progress=true,
@@ -230,7 +230,7 @@ end
                            show_progress=true)
         end
 
-        prep = prepare_explicit_avg(dom, :cos, gamma, 1.0, 10;
+        prep = prepare_explicit_avg(dom, :cos, fy, 1.0, 10;
                                     precision_policy=:float64, show_progress=false)
         avg_field = evolve_explicit_avg(dom, prep, ccoeffs, tvals, show_progress=false)
         parallel_avg = evolve_explicit_avg(dom, prep, ccoeffs, tvals;
@@ -300,7 +300,7 @@ end
         Nx=8
         Ny=100
         dom = domain(pi, 1, Nx, Ny)
-        U, β0_1, β_1 = StirMix.predefined_flow(:poiseuille, dom)
+        U, β0_1, β_1, _ = StirMix.predefined_flow(:poiseuille, dom)
         β0_2, β_2, _ = StirMix.normal_mode_decomposition(U, dom.y; Lx=Ny)
         # must finish test here
         @test isapprox(real(β0_1), real(β0_2); atol=1e-2, rtol=1e-2)
@@ -314,7 +314,7 @@ end
         # define purely odd flow field
         U_linear = dom.y / π
 
-        U, α0, α = StirMix.flow_decomposition(U_linear,  dom)
+        U, α0, α, _ = StirMix.flow_decomposition(U_linear,  dom)
 
         @test round(α0/2, digits=1) === 0.5
         @test maximum(round.(abs.(α[2:2:end]), digits=10)) === 0.0

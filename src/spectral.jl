@@ -177,26 +177,28 @@ Takes a shear flow and returns its sampled values plus the even Fourier
 coefficients β_0 and β_e.
 """
 function flow_decomposition(U::AbstractVector, domain::Domain)
+    even_extension = false
     y = domain.y
     Ny = 2 * domain.Ny
     β0, β, β_o = normal_mode_decomposition(U, y; Lx=Ny)
     nb = length(β_o)÷2
     if any(abs.(β_o[1:nb]) .> 1e-2)
+        even_extension = true
         U1 = U .- (β0/2)
         U2 = - U1
         U = (β0/2) .+ vcat(U1, U2)
         ny = vcat(y, pi .+ y)
         β0, β, _ = normal_mode_decomposition(U, ny; Lx=Ny)
     end 
-    return U, β0, β
+    return U, β0, β, even_extension
 end
 
 
 function flow_decomposition(flow::Symbol, domain::Domain)
 
-    U, β0, β = predefined_flow(flow, domain; Nmodes=length(domain.y)÷2)
+    U, β0, β, even_extension = predefined_flow(flow, domain; Nmodes=length(domain.y)÷2)
 
-    return U, β0, β
+    return U, β0, β, even_extension
 end
 
 
@@ -312,8 +314,12 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
                                 qc1::Union{Nothing,Real}=nothing, 
                                 qc2::Union{Nothing,Real}=nothing,
                                 compute_odd::Bool=true, 
-                                sweep_chunk_size::Union{Nothing,Integer}=nothing)
+                                sweep_chunk_size::Union{Nothing,Integer}=nothing,
+                                even_extension::Bool=false)
     sweep_chunk_size = _normalize_sweep_chunk_size(sweep_chunk_size)
+
+    # factor to consider if flow (1) is even or odd (2)
+    fac = even_extension ? 2.0 : 1.0
 
     nk = length(domain.K)
     qs = Vector{Union{ComplexF64, Complex{BigFloat}}}(undef, nk)
@@ -321,11 +327,10 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
     an = Vector{Any}(undef, nk)
     Ak = Vector{Any}(undef, nk)
 
-
     bn = compute_odd ? Vector{Any}(undef, nk) : nothing
     Bk = compute_odd ? Vector{Any}(undef, nk) : nothing
 
-    qdata = _q_values(domain.K, Pe; precision_policy=precision_policy, qc1=qc1, qc2=qc2)
+    qdata = _q_values(fac .* domain.K, Pe; precision_policy=precision_policy, qc1=qc1, qc2=qc2)
 
     # create one progress bar here
     nq = nk
@@ -407,15 +412,16 @@ function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
                         parallel::Bool = true,
                         show_progress::Bool=true, 
                         sweep_chunk_size::Union{Nothing,Integer}=nothing)
-    _, β0, β = flow_decomposition(U, domain)
+    _, β0, β, even_extension = flow_decomposition(U, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
                                   precision_policy=precision_policy, qc1=qc1, qc2=qc2,
                                   parallel=parallel,
                                   show_progress=show_progress,
                                   compute_odd=compute_odd,
-                                  sweep_chunk_size=sweep_chunk_size)
+                                  sweep_chunk_size=sweep_chunk_size,
+                                  even_extension=even_extension)
 
-    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk)
+    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk, even_extension)
 end
 
 
@@ -430,13 +436,18 @@ function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns::Union{Nothing,Inte
                         parallel::Bool=true,
                         show_progress::Bool=true, 
                         sweep_chunk_size::Union{Nothing,Integer}=nothing)
-    _, β0, β = flow_decomposition(flow, domain)
+    _, β0, β, even_extension = flow_decomposition(flow, domain)
+    if even_extension
+        compute_odd = true
+    end
+
     data = _collect_spectral_data(domain, Pe, Ns, β;
                                   precision_policy=precision_policy, qc1=qc1, qc2=qc2, 
                                   parallel=parallel,
                                   show_progress=show_progress,
                                   compute_odd=compute_odd,
-                                  sweep_chunk_size=sweep_chunk_size)
+                                  sweep_chunk_size=sweep_chunk_size,
+                                  even_extension=even_extension)
 
-    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk)
+    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk, even_extension)
 end

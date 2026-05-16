@@ -9,15 +9,15 @@ struct Domain
     K::Vector{Float64}
 end
 
-
 struct SpectralBasis
     qs
-    β0
-    β
+    β0::Float64
+    β::Vector{Float64}
     an
     bn
     Ak
     Bk
+    even_extension::Bool
 end
 
 struct AvgModeWork{T}
