@@ -203,9 +203,10 @@ end
 
 
 function _scatter_spectral_point!(qs, an, bn, Ak, Bk,
-                                  k, q, domain, Ns, β;
+                                  k, q, Ns, β;
                                   Nmax=nothing,
-                                  compute_odd::Bool=true)
+                                  compute_odd::Bool=true,
+                                  )
     λe, Ve = adaptive_eigen(Even, q, Ns, β; Nmax=Nmax)
 
     qs[k] = q
@@ -225,11 +226,12 @@ end
 
 
 function _scatter_spectral_batch!(qs, an, bn, Ak, Bk,
-                                  idx, qbatch, domain, Ns, β;
+                                  idx, qbatch, Ns, β;
                                   Nmax=nothing,
                                   advance_progress=nothing,
                                   compute_odd::Bool=true,
-                                  parallel::Bool=false)
+                                  parallel::Bool=false,
+                                  )
     isempty(idx) && return nothing
 
     units_per_q = 1 + Int(compute_odd)
@@ -239,7 +241,7 @@ function _scatter_spectral_batch!(qs, an, bn, Ak, Bk,
             q = qbatch[j]
 
             _scatter_spectral_point!(qs, an, bn, Ak, Bk,
-                                     k, q, domain, Ns, β;
+                                     k, q, Ns, β;
                                      Nmax=Nmax,
                                      compute_odd=compute_odd)
 
@@ -251,7 +253,7 @@ function _scatter_spectral_batch!(qs, an, bn, Ak, Bk,
             q = qbatch[j]
 
             _scatter_spectral_point!(qs, an, bn, Ak, Bk,
-                                     k, q, domain, Ns, β;
+                                     k, q, Ns, β;
                                      Nmax=Nmax,
                                      compute_odd=compute_odd)
 
@@ -273,7 +275,7 @@ end
 
 function _scatter_spectral_group!(qs, an, bn, Ak, Bk,
                                   idx::AbstractVector, qvals::AbstractVector,
-                                  domain, Ns, β;
+                                  Ns, β;
                                   sweep_chunk_size::Union{Nothing,Int}=nothing,
                                   parallel::Bool=false,
                                   kwargs...)
@@ -283,7 +285,7 @@ function _scatter_spectral_group!(qs, an, bn, Ak, Bk,
 
     if sweep_chunk_size === nothing
         _scatter_spectral_batch!(qs, an, bn, Ak, Bk,
-                                 idx, qvals, domain, Ns, β;
+                                 idx, qvals, Ns, β;
                                  parallel=parallel,
                                  kwargs...)
         return nothing
@@ -297,7 +299,7 @@ function _scatter_spectral_group!(qs, an, bn, Ak, Bk,
         q_chunk = @view qvals[first:last]
 
         _scatter_spectral_batch!(qs, an, bn, Ak, Bk,
-                                 idx_chunk, q_chunk, domain, Ns, β;
+                                 idx_chunk, q_chunk, Ns, β;
                                  parallel=parallel,
                                  kwargs...)
     end
@@ -318,8 +320,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
                                 even_extension::Bool=false)
     sweep_chunk_size = _normalize_sweep_chunk_size(sweep_chunk_size)
 
-    # factor to consider if flow (1) is even or odd (2)
-    fac = even_extension ? 2.0 : 1.0
+    fac = even_extension ? 4 : 1.0
 
     nk = length(domain.K)
     qs = Vector{Union{ComplexF64, Complex{BigFloat}}}(undef, nk)
@@ -363,7 +364,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
     try
 
         _scatter_spectral_group!(qs, an, bn, Ak, Bk,
-                                 qdata.idx64, qdata.qs64, domain, Ns, β;
+                                 qdata.idx64, qdata.qs64, Ns, β;
                                  Nmax=Nmax,
                                  parallel=parallel,
                                  advance_progress=advance_progress,
@@ -371,7 +372,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
                                  sweep_chunk_size=sweep_chunk_size)
 
         _scatter_spectral_group!(qs, an, bn, Ak, Bk,
-                                 qdata.idxbig, qdata.qsbig, domain, Ns, β;
+                                 qdata.idxbig, qdata.qsbig, Ns, β;
                                  Nmax=Nmax,
                                  parallel=parallel,
                                  advance_progress=advance_progress,
@@ -379,7 +380,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
                                  sweep_chunk_size=sweep_chunk_size)
 
         _scatter_spectral_group!(qs, an, bn, Ak, Bk,
-                                 qdata.idxHR, qdata.qsHR, domain, Ns, β;
+                                 qdata.idxHR, qdata.qsHR, Ns, β;
                                  Nmax=Nmax,
                                  advance_progress=advance_progress,
                                  parallel=parallel,
