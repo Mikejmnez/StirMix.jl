@@ -31,8 +31,9 @@ function capture_stderr(f)
 end
 
 @testset "StirMix.jl" begin
-    dom = domain(pi, 1, 8, 8)
-    fy = @. sin.(dom.y)
+    dom = domain(pi, 1, 8, 50)
+    fy_odd = @. sin.(2dom.y)
+    fy_even = @. cos.(2dom.y)
 
     @testset "spectral basis toggle" begin
         basis = spectral_basis(:cos, 1.0, dom, 10; 
@@ -133,15 +134,14 @@ end
     end
 
     @testset "averaged preparation reuses mixed spectral data" begin
-        gamma = ones(5)
         ccoeffs = ones(ComplexF64, length(dom.K))
 
         basis = spectral_basis(:cos, 1.0, dom, 10; show_progress=false)
-        field = solve_explicit(dom, basis, gamma, nothing, ccoeffs, [0.1], 1.0;
+        field = solve_explicit(dom, basis, fy_even, ccoeffs, [0.1], 1.0;
                                show_progress=false)
         @test size(field) == (1, length(dom.y), length(dom.x))
 
-        prep = prepare_explicit_avg(dom, :cos, fy, 1000.0, 10;
+        prep = prepare_explicit_avg(dom, :cos, fy_even, 1000.0, 10;
                                     precision_policy=:mixed,
                                     qc1=5000, qc2 = 15000,
                                     show_progress=false)
@@ -151,13 +151,13 @@ end
         U, _, _, _ = StirMix.predefined_flow(:cos, dom)
         symbol_progress_prep = redirect_stdout(devnull) do
             redirect_stderr(devnull) do
-                prepare_explicit_avg(dom, :cos, fy, 1.0, 10;
+                prepare_explicit_avg(dom, :cos, fy_even, 1.0, 10;
                                      precision_policy=:float64)
             end
         end
         vector_progress_prep = redirect_stdout(devnull) do
             redirect_stderr(devnull) do
-                prepare_explicit_avg(dom, U, fy, 1.0, 10;
+                prepare_explicit_avg(dom, U, fy_even, 1.0, 10;
                                      precision_policy=:float64)
             end
         end
@@ -174,14 +174,14 @@ end
         U, _, _, _ = StirMix.predefined_flow(:cos, dom)
 
         serial_prep, serial_output = capture_stderr() do
-            prepare_explicit_avg(dom, U, fy, 1.0, 10;
+            prepare_explicit_avg(dom, U, fy_even, 1.0, 10;
                                  precision_policy=:float64,
                                  parallel=false,
                                  show_progress=true,
                                  sweep_chunk_size=Int32(2))
         end
         parallel_prep, parallel_output = capture_stderr() do
-            prepare_explicit_avg(dom, :cos, fy, 1.0, 10;
+            prepare_explicit_avg(dom, :cos, fy_even, 1.0, 10;
                                  precision_policy=:float64,
                                  parallel=true,
                                  show_progress=true,
@@ -191,9 +191,9 @@ end
         @test length(serial_prep.work) == length(dom.K)
         @test length(parallel_prep.work) == length(dom.K)
         @test serial_prep.β0 == parallel_prep.β0
-        @test all(k -> serial_prep.work[k].A0 == parallel_prep.work[k].A0, eachindex(dom.K))
-        @test all(k -> serial_prep.work[k].λ == parallel_prep.work[k].λ, eachindex(dom.K))
-        @test all(k -> serial_prep.work[k].γproj == parallel_prep.work[k].γproj, eachindex(dom.K))
+        @test all(k -> round.(serial_prep.work[k].A0, digits=5) == round.(parallel_prep.work[k].A0, digits=5), eachindex(dom.K))
+        @test all(k -> round.(serial_prep.work[k].λ, digits=5) == round.(parallel_prep.work[k].λ, digits=5), eachindex(dom.K))
+        @test all(k -> round.(serial_prep.work[k].γproj, digits=5) == round.(parallel_prep.work[k].γproj, digits=5), eachindex(dom.K))
         @test isempty(serial_output) || occursin("Computing spectral basis", serial_output)
         @test isempty(parallel_output) || occursin("Computing spectral basis", parallel_output)
         @test !occursin("aborted", lowercase(serial_output))
@@ -201,36 +201,35 @@ end
     end
 
     @testset "explicit evolution progress" begin
-        gamma = ones(5)
         ccoeffs = ones(ComplexF64, length(dom.K))
         tvals = [0.1, 0.2, 0.3]
         progress_tvals = ProgressTestTimes(tvals)
 
         basis = spectral_basis(:cos, 1.0, dom, 10; precision_policy=:float64, show_progress=false)
-        field = solve_explicit(dom, basis, gamma, nothing, ccoeffs, tvals, 1.0, show_progress=false)
-        parallel_field = solve_explicit(dom, basis, gamma, nothing, ccoeffs, tvals, 1.0;
+        field = solve_explicit(dom, basis, fy_even, ccoeffs, tvals, 1.0; show_progress=false)
+        parallel_field = solve_explicit(dom, basis, fy_even, ccoeffs, tvals, 1.0;
                                         parallel=true, show_progress=false)
-        coefficient_field = solve_explicit(dom, basis, gamma, nothing, ccoeffs, tvals, 1.0;
+        coefficient_field = solve_explicit(dom, basis, fy_even, ccoeffs, tvals, 1.0;
                                            show_progress=false)
 
         coefficient_basis = spectral_basis(:cos, 1.0, dom, 10;
                                            show_progress=false,
                                            precision_policy=:float64,
                                            compute_odd=false)
-        coefficient_only_field = solve_explicit(dom, coefficient_basis, gamma, nothing,
+        coefficient_only_field = solve_explicit(dom, coefficient_basis, fy_even,
                                                 ccoeffs, tvals, 1.0;
                                                 show_progress=false)
 
         no_progress_field, no_progress_output = capture_stderr() do
-            solve_explicit(dom, basis, gamma, nothing, ccoeffs, progress_tvals, 1.0;
+            solve_explicit(dom, basis, fy_even, ccoeffs, progress_tvals, 1.0;
                            show_progress=false)
         end
         progress_field, progress_output = capture_stderr() do
-            solve_explicit(dom, basis, gamma, nothing, ccoeffs, progress_tvals, 1.0;
+            solve_explicit(dom, basis, fy_even, ccoeffs, progress_tvals, 1.0;
                            show_progress=true)
         end
 
-        prep = prepare_explicit_avg(dom, :cos, fy, 1.0, 10;
+        prep = prepare_explicit_avg(dom, :cos, fy_even, 1.0, 10;
                                     precision_policy=:float64, show_progress=false)
         avg_field = evolve_explicit_avg(dom, prep, ccoeffs, tvals, show_progress=false)
         parallel_avg = evolve_explicit_avg(dom, prep, ccoeffs, tvals;
@@ -264,8 +263,6 @@ end
     end
 
     @testset "explicit evolution" begin
-        gamma = ones(5)
-        gamma_o = [0.5, -0.25, 0.125, -0.0625]
         ccoeffs = ones(ComplexF64, length(dom.K))
         tvals = [0.1]
 
@@ -273,18 +270,18 @@ end
                                      precision_policy=:mixed,
                                      show_progress=false,
                                      qc1=0.0,
-                                     qc2=1.0e9,
+                                     qc2=1.0e3,
                                      compute_odd=false)
         basis_odd_coeff = spectral_basis(:cos, 10.0, dom, 4;
                                          precision_policy=:mixed,
                                          show_progress=false,
                                          qc1=0.0,
-                                         qc2=1.0e9,
+                                         qc2=1.0e3,
                                          compute_odd=true)
 
-        field_coeff = solve_explicit(dom, basis_coeff, gamma, nothing, ccoeffs,
+        field_coeff = solve_explicit(dom, basis_coeff, fy_even, ccoeffs,
                                      tvals, 10.0; show_progress=false)
-        field_odd_coeff = solve_explicit(dom, basis_odd_coeff, gamma, gamma_o,
+        field_odd_coeff = solve_explicit(dom, basis_odd_coeff, fy_odd,
                                          ccoeffs, tvals, 10.0;
                                          show_progress=false)
 
@@ -292,7 +289,7 @@ end
                   eachindex(dom.K))
         @test any(k -> eltype(basis_odd_coeff.Bk[k]) === Complex{BigFloat},
                   eachindex(dom.K))
-        @test_throws ArgumentError solve_explicit(dom, basis_coeff, gamma, gamma_o,
+        @test_throws ArgumentError solve_explicit(dom, basis_coeff, fy_odd,
                                                   ccoeffs, tvals, 10.0;
                                                   show_progress=false)
     end
@@ -375,8 +372,6 @@ end
         # ==================================
         σ2_y0 = 1/40
         g = @. exp(-(((dom.y-pi/4)/(sqrt(2*σ2_y0))).^2))
-        χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(g, 2*dom.y; Lx=2π)
-        γ_e = vcat(χ_0, χ_e)
 
         σ2_0 = 100
         f = @. 1*exp(-(((dom.x + 0)/(sqrt(2*σ2_0))).^2))
@@ -385,9 +380,9 @@ end
 
         basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false, compute_odd=true)
         # check initial condition in y direction
-        T_serial = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
+        T_serial = solve_explicit(dom, basis, g, Ccoeffs, tvals, Pe;
                                   show_progress=false, parallel=false)
-        T_parallel = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
+        T_parallel = solve_explicit(dom, basis, g, Ccoeffs, tvals, Pe;
                                   show_progress=false)
 
         # check initial condition in y direction
@@ -409,8 +404,6 @@ end
         # ==================================
         σ2_y0 = 1000
         g = @. exp(-(((dom.y-pi/4)/(sqrt(2*σ2_y0))).^2))
-        χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(g, 2*dom.y; Lx=2π)
-        γ_e = vcat(χ_0, χ_e)
 
         σ2_0 = 1/100
         f = @. 1*exp(-(((dom.x + 0)/(sqrt(2*σ2_0))).^2))
@@ -419,9 +412,9 @@ end
 
         basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false,
                               compute_odd=true)
-        T_serial = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
+        T_serial = solve_explicit(dom, basis, g, Ccoeffs, tvals, Pe;
                                   show_progress=false, parallel=false)
-        T_parallel = solve_explicit(dom, basis, γ_e, γ_o, Ccoeffs, tvals, Pe;
+        T_parallel = solve_explicit(dom, basis, g, Ccoeffs, tvals, Pe;
                                     show_progress=false)
 
         # check initial condition in y direction

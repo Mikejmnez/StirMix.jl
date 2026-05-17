@@ -39,7 +39,7 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k)
     βshift = im * (Float64(basis.β0) / 2) * Kk * Float64(Pe)
 
     λ = ComplexF64.(basis.an[k])
-    @. λ = λ / 4 + Kk^2 + βshift
+    @. λ =  λ / 4 + Kk^2 + βshift
 
     Nuse = min(R, length(γ))
     γlow = @view γ[1:Nuse]
@@ -72,7 +72,7 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k)
     f_o = nothing
     tail_o = nothing
 
-    if γ_o !== nothing
+    if any(γ_o .> 1e-6)
         Bk = basis.Bk[k]
         R_o, Nno = size(Bk)
 
@@ -110,7 +110,7 @@ end
 
 
 function _prepare_coefficient_mode_work(dom, basis, γ, γ_o, Pe)
-    γ_o !== nothing && _require_basis_odd_coefficients(basis)
+    any(γ_o .> 1e-6) && _require_basis_odd_coefficients(basis)
 
     nk = length(dom.K)
     work = Vector{Any}(undef, nk)
@@ -190,13 +190,13 @@ function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe)
 end
 
 
-function _add_tail!(f, tail, t, Kk)
+function _add_tail!(f, tail, t, Kk, fac)
     m_tail, Atail, γtail, tmp = tail
     isempty(m_tail) && return nothing
 
     k2 = Kk^2
     @inbounds for j in eachindex(m_tail)
-        tmp[j] = γtail[j] * exp(-Float64(t) * (Float64(m_tail[j])^2 + k2))
+        tmp[j] = γtail[j] * exp(-Float64(t) * (fac * Float64(m_tail[j])^2 + k2))
     end
     mul!(f, Atail, tmp, one(eltype(f)), one(eltype(f)))
 
@@ -205,26 +205,27 @@ end
 
 
 function _solve_explicit_time!(T, it, t, spectrum, work,
-                                            dom, Ccoeffs, x0, nx, ny, nk)
+                                            dom, Ccoeffs, x0, nx, ny, nk, fac)
     fill!(spectrum, 0)
     t64 = Float64(t)
+    _ny = size(T,2)
 
     for k in 1:nk
         wk = work[k]
         Kk = 2π * dom.K[k]
 
-        @. wk.e = exp(-t64 * wk.λ)
+        @. wk.e = exp(-t64 * fac * wk.λ)
         @. wk.modal = wk.projection * wk.e
         mul!(wk.coeff_y, wk.Ak, wk.modal)
         mul!(wk.f, wk.By, wk.coeff_y)
-        _add_tail!(wk.f, wk.tail, t64, Kk)
+        _add_tail!(wk.f, wk.tail, t64, Kk, fac)
 
         if wk.projection_o !== nothing
             @. wk.e_o = exp(-t64 * wk.λ_o)
             @. wk.modal_o = wk.projection_o * wk.e_o
             mul!(wk.coeff_y_o, wk.Bk, wk.modal_o)
             mul!(wk.f_o, wk.By_o, wk.coeff_y_o)
-            _add_tail!(wk.f_o, wk.tail_o, t64, Kk)
+            _add_tail!(wk.f_o, wk.tail_o, t64, Kk, fac)
         end
 
         phase0 = Ccoeffs[k] * cis(Kk * x0)
@@ -252,25 +253,45 @@ function _solve_explicit_time!(T, it, t, spectrum, work,
             end
         end
     end
-
-    @views T[it, :, :] .= irfft(spectrum, nx, 2)
+    @views T[it, :, :] .= irfft(spectrum, nx, 2)[1:_ny, :]
     return nothing
 end
 
 
-function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
+function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
                         show_progress::Bool=true,
                         parallel::Bool=true)
 
+    if basis.even_extension
+        fac = 0.25
+        Nγ = 2*Nγ
+        nfy = vcat(fy, fy)
+        Nγ = length(nfy)÷2
+        _y = vcat(dom.y, pi .+ dom.y)
+        χ_0, χ_e, γ_o = normal_mode_decomposition(nfy, _y; Lx=2π)
+        ny = length(_y)
+        dx = dom.x[2]-dom.x[1]
+        _L = dom.x[end]-dom.x[1] + dx
+        _dom = domain(_L, 1, length(dom.x), ny)
+    else
+        fac = 1.0
+        χ_0, χ_e, γ_o = normal_mode_decomposition(fy, 2*dom.y; Lx=2π)
+        ny = length(dom.y)
+        Nγ = ny÷2
+        _dom = dom
+    end
+
+    γ = vcat(χ_0, χ_e)[1:Nγ]
+    γ_o = γ_o[1:Nγ]
+
     nt = length(tvals)
-    ny = length(dom.y)
     nx = length(dom.x)
     nk = length(dom.K)
 
-    T = zeros(Float64, nt, ny, nx)
+    T = zeros(Float64, nt, length(dom.y), nx)
 
     x0 = dom.x[1]
-    γ_o !== nothing && _require_basis_odd_coefficients(basis)
+    any(γ_o .> 1e-6) && _require_basis_odd_coefficients(basis)
 
     # define progressmeter instance
     p = show_progress && nt > 0 ?
@@ -309,29 +330,28 @@ function solve_explicit(dom, basis, γ, γ_o, Ccoeffs, tvals, Pe;
 
             tasks = map(chunks) do chunk
                 Threads.@spawn begin
-                    local_work = _prepare_coefficient_mode_work(dom, basis, γ, γ_o, Pe)
+                    local_work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe)
                     local_spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
 
                     for it in chunk
                         _solve_explicit_time!(T, it, tbuf[it],
                                                            local_spectrum,
-                                                           local_work, dom,
+                                                           local_work, _dom,
                                                            Ccoeffs, x0,
-                                                           nx, ny, nk)
+                                                           nx, ny, nk, fac)
                         advance_progress === nothing || advance_progress()
                     end
                 end
             end
-
             _fetch_all_tasks(tasks)
         else
-            work = _prepare_coefficient_mode_work(dom, basis, γ, γ_o, Pe)
+            work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe)
             spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
 
             for (it, t) in enumerate(tvals)
                 _solve_explicit_time!(T, it, t, spectrum,
-                                                   work, dom, Ccoeffs, x0,
-                                                   nx, ny, nk)
+                                                   work, _dom, Ccoeffs, x0,
+                                                   nx, ny, nk, fac)
                 advance_progress === nothing || advance_progress()
             end
         end
@@ -407,15 +427,18 @@ function prepare_explicit_avg(dom, U::AbstractVector, fy, Pe, Ns;
     _, β0, β, even_extension = flow_decomposition(U, dom)
 
     if even_extension
-        # flow is odd so need to do an even periodic extension
+        fac = 0.25
         nfy = vcat(fy,fy)
-        χ_0, χ_e, _ = normal_mode_decomposition(nfy, 2*dom.y; Lx=2π)
+        ny = vcat(dom.y, pi .+ dom.y)
+        χ_0, χ_e, _ = normal_mode_decomposition(nfy, ny; Lx=2π)
+        γ = vcat(χ_0, χ_e) 
+        Nmax = length(γ)
     else
+        fac = 1.0
         χ_0, χ_e, _ = normal_mode_decomposition(fy, 2*dom.y; Lx=2π)
+        γ = vcat(χ_0, χ_e) 
+        Nmax = length(γ)÷2 # arbitrary but O(size of y)
     end
-
-    γ = vcat(χ_0, χ_e)
-    Nmax = length(γ) ÷ 2 # arbitrary but O(length(y)) 
 
     data = _collect_spectral_data(dom, Peabs, Ns, β;
                                   Nmax=Nmax,
@@ -429,7 +452,7 @@ function prepare_explicit_avg(dom, U::AbstractVector, fy, Pe, Ns;
 
     work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe)
 
-    return (; β0, work)
+    return (; β0, work, fac)
 end
 
 
@@ -443,12 +466,14 @@ function prepare_explicit_avg(dom, flow::Symbol, fy, Pe, Ns;
     Peabs = abs(Pe)
     _, β0, β, even_extension = flow_decomposition(flow, dom)
     if even_extension
+        fac = 0.25
         nfy = vcat(fy,fy)
         ny = vcat(dom.y, pi .+ dom.y)
         χ_0, χ_e, _ = normal_mode_decomposition(nfy, ny; Lx=2π)
         γ = vcat(χ_0, χ_e) 
         Nmax = length(γ)
     else
+        fac = 1.0
         χ_0, χ_e, _ = normal_mode_decomposition(fy, 2*dom.y; Lx=2π)
         γ = vcat(χ_0, χ_e) 
         Nmax = length(γ)÷2 # arbitrary but O(size of y)
@@ -467,7 +492,7 @@ function prepare_explicit_avg(dom, flow::Symbol, fy, Pe, Ns;
 
     work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe)
 
-    return (; β0, work)
+    return (; β0, work, fac)
 end
 
 
@@ -477,13 +502,13 @@ function _avg_work_scratch(work)
 end
 
 
-function _evolve_explicit_avg_time!(T, it, t, spec, work, dom, Ccoeffs, x0, nx)
+function _evolve_explicit_avg_time!(T, it, t, spec, work, dom, Ccoeffs, x0, nx, fac)
     fill!(spec, 0)
 
     for k in eachindex(dom.K)
         wk = work[k]
 
-        @. wk.e = exp(-t * wk.λ)
+        @. wk.e = exp(-t * fac * wk.λ )
 
         # Modal averages may use high precision;
         # FFTW reconstruction is intentionally Float64.
@@ -518,6 +543,8 @@ function evolve_explicit_avg(dom, prep, Ccoeffs, tvals;
 
     x0 = dom.x[1]
 
+    # scalar factor associated with an even periodic extension
+    fac = prep.fac 
     # define progressmeter instance
     p = show_progress && nt > 0 ?
         Progress(nt; desc="Computing time-evolving solution") :
@@ -560,7 +587,7 @@ function evolve_explicit_avg(dom, prep, Ccoeffs, tvals;
 
                     for it in chunk
                         _evolve_explicit_avg_time!(T, it, tbuf[it], local_spec,
-                                                   local_work, dom, Ccoeffs, x0, nx)
+                                                   local_work, dom, Ccoeffs, x0, nx, fac)
                         advance_progress === nothing || advance_progress()
                     end
                 end
@@ -570,7 +597,7 @@ function evolve_explicit_avg(dom, prep, Ccoeffs, tvals;
         else
             for (it, t) in enumerate(tvals)
                 _evolve_explicit_avg_time!(T, it, t, spec, prep.work, dom,
-                                           Ccoeffs, x0, nx)
+                                           Ccoeffs, x0, nx, fac)
                 advance_progress === nothing || advance_progress()
             end
         end
