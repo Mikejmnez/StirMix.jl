@@ -204,56 +204,74 @@ function _add_tail!(f, tail, t, Kk, fac)
 end
 
 
-function _solve_explicit_time!(T, it, t, spectrum, work,
-                                            dom, Ccoeffs, x0, nx, ny, nk, fac)
+function _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0, nx, ny, fac, t64, k)
+    wk = work[k]
+    Kk = 2π * dom.K[k]
+
+    @. wk.e = exp(-t64 * fac * wk.λ)
+    @. wk.modal = wk.projection * wk.e
+    mul!(wk.coeff_y, wk.Ak, wk.modal)
+    mul!(wk.f, wk.By, wk.coeff_y)
+    _add_tail!(wk.f, wk.tail, t64, Kk, fac)
+
+    if wk.projection_o !== nothing
+        @. wk.e_o = exp(-t64 * wk.λ_o)
+        @. wk.modal_o = wk.projection_o * wk.e_o
+        mul!(wk.coeff_y_o, wk.Bk, wk.modal_o)
+        mul!(wk.f_o, wk.By_o, wk.coeff_y_o)
+        _add_tail!(wk.f_o, wk.tail_o, t64, Kk, fac)
+    end
+
+    phase0 = Ccoeffs[k] * cis(Kk * x0)
+    col = @view spectrum[:, k]
+    if _irfft_self_conjugate_mode(k, nx)
+        if wk.projection_o !== nothing
+            @inbounds @simd for iy in 1:ny
+                col[iy] = nx * real(ComplexF64((wk.f[iy] + wk.f_o[iy]) * phase0))
+            end
+        else
+            @inbounds @simd for iy in 1:ny
+                col[iy] = nx * real(ComplexF64(wk.f[iy] * phase0))
+            end
+        end
+    else
+        scale = nx / 2
+        if wk.projection_o !== nothing
+            @inbounds @simd for iy in 1:ny
+                col[iy] = scale * ComplexF64((wk.f[iy] + wk.f_o[iy]) * phase0)
+            end
+        else
+            @inbounds @simd for iy in 1:ny
+                col[iy] = scale * ComplexF64(wk.f[iy] * phase0)
+            end
+        end
+    end
+
+    return nothing
+end
+
+
+function _solve_explicit_time!(T, it, t, spectrum, field, xplan, work,
+                                            dom, Ccoeffs, x0, nx, ny, nk, fac;
+                                            parallel::Bool=false)
     fill!(spectrum, 0)
     t64 = Float64(t)
     _ny = size(T,2)
 
-    for k in 1:nk
-        wk = work[k]
-        Kk = 2π * dom.K[k]
-
-        @. wk.e = exp(-t64 * fac * wk.λ)
-        @. wk.modal = wk.projection * wk.e
-        mul!(wk.coeff_y, wk.Ak, wk.modal)
-        mul!(wk.f, wk.By, wk.coeff_y)
-        _add_tail!(wk.f, wk.tail, t64, Kk, fac)
-
-        if wk.projection_o !== nothing
-            @. wk.e_o = exp(-t64 * wk.λ_o)
-            @. wk.modal_o = wk.projection_o * wk.e_o
-            mul!(wk.coeff_y_o, wk.Bk, wk.modal_o)
-            mul!(wk.f_o, wk.By_o, wk.coeff_y_o)
-            _add_tail!(wk.f_o, wk.tail_o, t64, Kk, fac)
+    if parallel && Threads.nthreads() > 1 && nk > 1
+        Threads.@threads :dynamic for k in 1:nk
+            _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0,
+                                  nx, ny, fac, t64, k)
         end
-
-        phase0 = Ccoeffs[k] * cis(Kk * x0)
-        col = @view spectrum[:, k]
-        if _irfft_self_conjugate_mode(k, nx)
-            if wk.projection_o !== nothing
-                @inbounds @simd for iy in 1:ny
-                    col[iy] = nx * real(ComplexF64((wk.f[iy] + wk.f_o[iy]) * phase0))
-                end
-            else
-                @inbounds @simd for iy in 1:ny
-                    col[iy] = nx * real(ComplexF64(wk.f[iy] * phase0))
-                end
-            end
-        else
-            scale = nx / 2
-            if wk.projection_o !== nothing
-                @inbounds @simd for iy in 1:ny
-                    col[iy] = scale * ComplexF64((wk.f[iy] + wk.f_o[iy]) * phase0)
-                end
-            else
-                @inbounds @simd for iy in 1:ny
-                    col[iy] = scale * ComplexF64(wk.f[iy] * phase0)
-                end
-            end
+    else
+        for k in 1:nk
+            _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0,
+                                  nx, ny, fac, t64, k)
         end
     end
-    @views T[it, :, :] .= irfft(spectrum, nx, 2)[1:_ny, :]
+
+    mul!(field, xplan, spectrum)
+    @views T[it, :, :] .= field[1:_ny, :]
     return nothing
 end
 
@@ -264,7 +282,6 @@ function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
 
     if basis.even_extension
         fac = 0.25
-        Nγ = 2*Nγ
         nfy = vcat(fy, fy)
         Nγ = length(nfy)÷2
         _y = vcat(dom.y, pi .+ dom.y)
@@ -307,56 +324,30 @@ function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
     end
 
     completed=false
+    old_fft_threads = nothing
 
     try
-        if parallel && Threads.nthreads() > 1 && nt > 1
-            tbuf = collect(tvals)
-            nworkers = min(Threads.nthreads(), nt)
-            chunks = _time_chunks(nt, nworkers)
-            progress_lock = ReentrantLock()
+        if parallel && Threads.nthreads() > 1
+            old_fft_threads = FFTW.get_num_threads()
+            FFTW.set_num_threads(Threads.nthreads())
+        end
 
-            if advance_progress !== nothing
-                advance_progress = () -> begin
-                    lock(progress_lock)
-                    try
-                        processed[] += 1
-                        update!(p, processed[])
-                    finally
-                        unlock(progress_lock)
-                    end
-                    return nothing
-                end
-            end
+        work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe)
+        spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
+        field = Matrix{Float64}(undef, ny, nx)
+        xplan = plan_irfft(spectrum, nx, 2)
 
-            tasks = map(chunks) do chunk
-                Threads.@spawn begin
-                    local_work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe)
-                    local_spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
-
-                    for it in chunk
-                        _solve_explicit_time!(T, it, tbuf[it],
-                                                           local_spectrum,
-                                                           local_work, _dom,
-                                                           Ccoeffs, x0,
-                                                           nx, ny, nk, fac)
-                        advance_progress === nothing || advance_progress()
-                    end
-                end
-            end
-            _fetch_all_tasks(tasks)
-        else
-            work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe)
-            spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
-
-            for (it, t) in enumerate(tvals)
-                _solve_explicit_time!(T, it, t, spectrum,
-                                                   work, _dom, Ccoeffs, x0,
-                                                   nx, ny, nk, fac)
-                advance_progress === nothing || advance_progress()
-            end
+        for (it, t) in enumerate(tvals)
+            _solve_explicit_time!(T, it, t, spectrum, field, xplan,
+                                  work, _dom, Ccoeffs, x0,
+                                  nx, ny, nk, fac;
+                                  parallel=parallel)
+            advance_progress === nothing || advance_progress()
         end
         completed = true
     finally
+        old_fft_threads === nothing || FFTW.set_num_threads(old_fft_threads)
+
         if p !== nothing
             if completed
                 finish!(p)
