@@ -301,6 +301,7 @@ function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
     γ = vcat(χ_0, χ_e)[1:Nγ]
     γ_o = γ_o[1:Nγ]
 
+
     nt = length(tvals)
     nx = length(dom.x)
     nk = length(dom.K)
@@ -367,7 +368,8 @@ with levels spaced by
 
     Δ = 1 / 2^nt
 
-over the interval [-1, 1].
+over the interval [0, 1] when `ft` is nonnegative, and over [-1, 1]
+otherwise.
 
 Returns `(nft, vals, ivals)` where
 
@@ -385,22 +387,21 @@ function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
 
     T = float(eltype(ft))
     Δ = one(T) / T(2^nt)
+    lo = !isempty(ft) && all(x -> T(x) >= zero(T), ft) ? zero(T) : -one(T)
+    hi = one(T)
 
-    # Allowed values: -1, ..., -Δ, 0, Δ, ..., 1
-    vals = collect(-one(T):Δ:one(T))
+    vals = collect(lo:Δ:hi)
 
     nft = Vector{T}(undef, length(ft))
     ivals = Vector{Int}(undef, length(ft))
 
-    offset = Int(round(one(T) / Δ)) + 1   # maps 0 -> center index
-
     @inbounds for i in eachindex(ft)
         # nearest allowed level
-        y = clamp(Δ * round(T(ft[i]) / Δ), -one(T), one(T))
+        y = clamp(Δ * round(T(ft[i]) / Δ), lo, hi)
         nft[i] = y
 
         # map y to its position in vals
-        ivals[i] = Int(round(y / Δ)) + offset
+        ivals[i] = Int(round((y - lo) / Δ)) + 1
     end
 
     return nft, vals, ivals
@@ -526,6 +527,7 @@ end
 function evolve_explicit_avg(dom, prep, Ccoeffs, tvals;
                              show_progress::Bool=true,
                              parallel::Bool=true)
+
     nt = length(tvals)
     nx = length(dom.x)
 

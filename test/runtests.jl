@@ -262,6 +262,22 @@ end
         @test !occursin("aborted", lowercase(progress_avg_output))
     end
 
+    @testset "time resampling ranges" begin
+        nft, vals, ivals = StirMix.time_resample([0.0, 0.24, 0.26, 0.74, 0.76, 1.0];
+                                                 nt=1)
+        @test vals == [0.0, 0.5, 1.0]
+        @test nft == [0.0, 0.0, 0.5, 0.5, 1.0, 1.0]
+        @test ivals == [1, 1, 2, 2, 3, 3]
+        @test vals[ivals] == nft
+
+        signed_nft, signed_vals, signed_ivals =
+            StirMix.time_resample([-1.0, -0.74, -0.26, 0.26, 0.74, 1.0]; nt=1)
+        @test signed_vals == [-1.0, -0.5, 0.0, 0.5, 1.0]
+        @test signed_nft == [-1.0, -0.5, -0.5, 0.5, 0.5, 1.0]
+        @test signed_ivals == [1, 2, 2, 4, 4, 5]
+        @test signed_vals[signed_ivals] == signed_nft
+    end
+
     @testset "explicit evolution" begin
         ccoeffs = ones(ComplexF64, length(dom.K))
         tvals = [0.1]
