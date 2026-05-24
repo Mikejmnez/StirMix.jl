@@ -277,6 +277,7 @@ end
 
 
 function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
+                        t0::Real=0.0,
                         show_progress::Bool=true,
                         parallel::Bool=true)
 
@@ -301,8 +302,13 @@ function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
     γ = vcat(χ_0, χ_e)[1:Nγ]
     γ_o = γ_o[1:Nγ]
 
-
-    nt = length(tvals)
+    if t0>0.0
+        idx = Int(round((t0 - first(tvals)) / step(tvals))) + 1
+        τ = τ[idx:end]
+    else
+        τ = tvals
+    end
+    nt = length(τ)
     nx = length(dom.x)
     nk = length(dom.K)
 
@@ -338,7 +344,7 @@ function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
         field = Matrix{Float64}(undef, ny, nx)
         xplan = plan_irfft(spectrum, nx, 2)
 
-        for (it, t) in enumerate(tvals)
+        for (it, t) in enumerate(τ)
             _solve_explicit_time!(T, it, t, spectrum, field, xplan,
                                   work, _dom, Ccoeffs, x0,
                                   nx, ny, nk, fac;
