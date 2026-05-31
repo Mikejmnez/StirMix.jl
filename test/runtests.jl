@@ -439,4 +439,21 @@ end
 
     end
 
+    @testset "time amplitude discretization" begin
+        t = range(0, 2π, length=100)
+        ft = 0.5 .+ 0.5*cos.(2 .* t)
+
+        nft, vals, ivals = StirMix.time_resample(ft; nt=1)
+        # this is specific to the choice of nt=1 above
+        @assert vals ≈ [0.0, 0.5, 1.0]
+        @assert all(i -> nft[i] in vals, ivals)
+
+
+        ind = StirMix.indt_intervals(ivals)
+        # test that values are indeed equal in the intervals
+        @assert all(i -> nft[ind[i][1]] === nft[ind[i][2]], range(1,length(ind)))
+
+
+    end
+
 end

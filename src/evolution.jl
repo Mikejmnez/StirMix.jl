@@ -302,12 +302,13 @@ function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
     γ = vcat(χ_0, χ_e)[1:Nγ]
     γ_o = γ_o[1:Nγ]
 
-    if t0>0.0
+    if t0 > 0.0
         idx = Int(round((t0 - first(tvals)) / step(tvals))) + 1
         τ = τ[idx:end]
     else
         τ = tvals
     end
+
     nt = length(τ)
     nx = length(dom.x)
     nk = length(dom.K)
@@ -366,52 +367,6 @@ function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
     return T
 end
 
-"""
-    time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
-
-Discretize a real-valued periodic signal `ft` into a piecewise-constant signal
-with levels spaced by
-
-    Δ = 1 / 2^nt
-
-over the interval [0, 1] when `ft` is nonnegative, and over [-1, 1]
-otherwise.
-
-Returns `(nft, vals, ivals)` where
-
-- `nft`   : discretized signal
-- `vals`  : all allowed discrete values, ordered increasingly
-- `ivals` : indices such that `vals[ivals[i]] == nft[i]`
-
-Notes:
-- `ivals` uses Julia's 1-based indexing.
-- This version uses nearest-level rounding, which reproduces the Python
-  midpoint logic efficiently.
-"""
-function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
-    nt < 0 && throw(ArgumentError("nt must be >= 0"))
-
-    T = float(eltype(ft))
-    Δ = one(T) / T(2^nt)
-    lo = !isempty(ft) && all(x -> T(x) >= zero(T), ft) ? zero(T) : -one(T)
-    hi = one(T)
-
-    vals = collect(lo:Δ:hi)
-
-    nft = Vector{T}(undef, length(ft))
-    ivals = Vector{Int}(undef, length(ft))
-
-    @inbounds for i in eachindex(ft)
-        # nearest allowed level
-        y = clamp(Δ * round(T(ft[i]) / Δ), lo, hi)
-        nft[i] = y
-
-        # map y to its position in vals
-        ivals[i] = Int(round((y - lo) / Δ)) + 1
-    end
-
-    return nft, vals, ivals
-end
 
 
 function prepare_explicit_avg(dom, U::AbstractVector, fy, Pe, Ns;

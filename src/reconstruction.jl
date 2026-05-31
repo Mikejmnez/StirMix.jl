@@ -67,10 +67,81 @@ function reconstruct_fourier_series(x::AbstractVector, a0::Real,
     return f
 end
 
+
 function reconstruct_from_complex_coeffs(x, K, C)
     f = zeros(Float64, length(x))
     for k in eachindex(K)
         f .+= real.(C[k] .* exp.(im .* K[k] .* x))
     end
     return f
+end
+
+
+
+"""
+    time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
+
+Discretize a real-valued periodic signal `ft` into a piecewise-constant signal
+with levels spaced by
+
+    Δ = 1 / 2^nt
+
+over the interval [0, 1] when `ft` is nonnegative, and over [-1, 1]
+otherwise.
+
+Returns `(nft, vals, ivals)` where
+
+- `nft`   : discretized signal
+- `vals`  : all allowed discrete values, ordered increasingly
+- `ivals` : indices such that `vals[ivals[i]] == nft[i]`
+
+Notes:
+- `ivals` uses Julia's 1-based indexing.
+- This version uses nearest-level rounding, which reproduces the Python
+  midpoint logic efficiently.
+"""
+function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
+    nt < 0 && throw(ArgumentError("nt must be >= 0"))
+
+    T = float(eltype(ft))
+    Δ = one(T) / T(2^nt)
+    lo = !isempty(ft) && all(x -> T(x) >= zero(T), ft) ? zero(T) : -one(T)
+    hi = one(T)
+
+    vals = collect(lo:Δ:hi)
+
+    nft = Vector{T}(undef, length(ft))
+    ivals = Vector{Int}(undef, length(ft))
+
+    @inbounds for i in eachindex(ft)
+        # nearest allowed level
+        y = clamp(Δ * round(T(ft[i]) / Δ), lo, hi)
+        nft[i] = y
+
+        # map y to its position in vals
+        ivals[i] = Int(round((y - lo) / Δ)) + 1
+    end
+
+    return nft, vals, ivals
+end
+
+
+"""
+    indt_intervals(ivals::Vector{Integer})
+"""
+function indt_intervals(ivals)
+    indt = Tuple{Int,Int}[]
+
+    t0 = 1
+
+    for k in 1:length(ivals)-1
+        if ivals[k] != ivals[k+1]
+            push!(indt, (t0, k))
+            t0 = k + 1
+        end
+    end
+
+    push!(indt, (t0, length(ivals)))
+
+    return indt
 end
