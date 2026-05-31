@@ -276,7 +276,7 @@ function _solve_explicit_time!(T, it, t, spectrum, field, xplan, work,
 end
 
 
-function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
+function solve_explicit(dom, basis, fy, Ccoeffs, tvals;
                         t0::Real=0.0,
                         show_progress::Bool=true,
                         parallel::Bool=true)
@@ -299,6 +299,7 @@ function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
         _dom = dom
     end
 
+    Pe = basis.Pe 
     γ = vcat(χ_0, χ_e)[1:Nγ]
     γ_o = γ_o[1:Nγ]
 
@@ -367,89 +368,6 @@ function solve_explicit(dom, basis, fy, Ccoeffs, tvals, Pe;
     return T
 end
 
-
-
-function prepare_explicit_avg(dom, U::AbstractVector, fy, Pe, Ns;
-                              precision_policy=:float64, qc1::Union{Nothing,Real}=nothing,
-                              qc2::Union{Nothing,Real}=nothing,
-                              parallel::Bool=true,
-                              show_progress::Bool=true, 
-                              sweep_chunk_size::Union{Nothing,Integer}=nothing)
-    Peabs = abs(Pe)
-
-    _, β0, β, even_extension = flow_decomposition(U, dom)
-
-    if even_extension
-        fac = 0.25
-        nfy = vcat(fy,fy)
-        ny = vcat(dom.y, pi .+ dom.y)
-        χ_0, χ_e, _ = normal_mode_decomposition(nfy, ny; Lx=2π)
-        γ = vcat(χ_0, χ_e) 
-        Nmax = length(γ)
-    else
-        fac = 1.0
-        χ_0, χ_e, _ = normal_mode_decomposition(fy, 2*dom.y; Lx=2π)
-        γ = vcat(χ_0, χ_e) 
-        Nmax = length(γ)÷2 # arbitrary but O(size of y)
-    end
-
-    data = _collect_spectral_data(dom, Peabs, Ns, β;
-                                  Nmax=Nmax,
-                                  precision_policy=precision_policy,
-                                  qc1=qc1, qc2=qc2,
-                                  parallel=parallel,
-                                  show_progress=show_progress,
-                                  compute_odd=false, 
-                                  sweep_chunk_size=sweep_chunk_size, 
-                                  even_extension=even_extension) # this is not true always
-
-    work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe)
-
-    return (; β0, work, fac)
-end
-
-
-function prepare_explicit_avg(dom, flow::Symbol, fy, Pe, Ns;
-                              precision_policy=:float64, qc1::Union{Nothing,Real}=nothing,
-                              qc2::Union{Nothing,Real}=nothing,
-                              parallel::Bool=true,
-                              show_progress::Bool=true, 
-                              sweep_chunk_size::Union{Nothing,Integer}=nothing)
-
-    Peabs = abs(Pe)
-    _, β0, β, even_extension = flow_decomposition(flow, dom)
-    if even_extension
-        fac = 0.25
-        nfy = vcat(fy,fy)
-        ny = vcat(dom.y, pi .+ dom.y)
-        χ_0, χ_e, _ = normal_mode_decomposition(nfy, ny; Lx=2π)
-        γ = vcat(χ_0, χ_e) 
-        Nmax = length(γ)
-    else
-        fac = 1.0
-        χ_0, χ_e, _ = normal_mode_decomposition(fy, 2*dom.y; Lx=2π)
-        γ = vcat(χ_0, χ_e) 
-        Nmax = length(γ)÷2 # arbitrary but O(size of y)
-    end
-
-
-    data = _collect_spectral_data(dom, Peabs, Ns, β;
-                                  Nmax=Nmax,
-                                  precision_policy=precision_policy,
-                                  qc1=qc1, qc2=qc2,
-                                  parallel=parallel,
-                                  show_progress=show_progress,
-                                  compute_odd=false, 
-                                  sweep_chunk_size=sweep_chunk_size,
-                                  even_extension=even_extension)
-
-    work = prepare_mode_data_avg(dom, data.Ak, data.an, γ, β0, Pe)
-
-    return (; β0, work, fac)
-end
-
-
-
 function _avg_work_scratch(work)
     return [AvgModeWork(w.A0, w.λ, w.γproj, similar(w.e)) for w in work]
 end
@@ -485,9 +403,24 @@ function _evolve_explicit_avg_time!(T, it, t, spec, work, dom, Ccoeffs, x0, nx, 
 end
 
 
-function evolve_explicit_avg(dom, prep, Ccoeffs, tvals;
+function evolve_explicit_avg(dom, basis, fy, Ccoeffs, tvals;
                              show_progress::Bool=true,
                              parallel::Bool=true)
+
+    if basis.even_extension
+        fac = 0.25
+        nfy = vcat(fy, fy)
+        Nγ = length(nfy)÷2
+        _y = vcat(dom.y, pi .+ dom.y)
+        χ_0, χ_e, _ = normal_mode_decomposition(nfy, _y; Lx=2π)
+    else
+        fac = 1.0
+        χ_0, χ_e, _ = normal_mode_decomposition(fy, 2*dom.y; Lx=2π)
+        ny = length(dom.y)
+        Nγ = ny÷2
+    end
+
+    γ = vcat(χ_0, χ_e)[1:Nγ]
 
     nt = length(tvals)
     nx = length(dom.x)
@@ -497,8 +430,8 @@ function evolve_explicit_avg(dom, prep, Ccoeffs, tvals;
 
     x0 = dom.x[1]
 
-    # scalar factor associated with an even periodic extension
-    fac = prep.fac 
+    work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, basis.β0, basis.Pe)
+
     # define progressmeter instance
     p = show_progress && nt > 0 ?
         Progress(nt; desc="Computing time-evolving solution") :
@@ -536,7 +469,7 @@ function evolve_explicit_avg(dom, prep, Ccoeffs, tvals;
 
             tasks = map(chunks) do chunk
                 Threads.@spawn begin
-                    local_work = _avg_work_scratch(prep.work)
+                    local_work = _avg_work_scratch(work)
                     local_spec = zeros(ComplexF64, nx ÷ 2 + 1)
 
                     for it in chunk
@@ -550,7 +483,7 @@ function evolve_explicit_avg(dom, prep, Ccoeffs, tvals;
             _fetch_all_tasks(tasks)
         else
             for (it, t) in enumerate(tvals)
-                _evolve_explicit_avg_time!(T, it, t, spec, prep.work, dom,
+                _evolve_explicit_avg_time!(T, it, t, spec, work, dom,
                                            Ccoeffs, x0, nx, fac)
                 advance_progress === nothing || advance_progress()
             end

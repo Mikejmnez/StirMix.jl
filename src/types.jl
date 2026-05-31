@@ -17,6 +17,7 @@ struct SpectralBasis
     bn
     Ak
     Bk
+    Pe::Float64
     even_extension::Bool
 end
 

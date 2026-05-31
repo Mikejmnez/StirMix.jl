@@ -450,5 +450,5 @@ function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns::Union{Nothing,Inte
                                   sweep_chunk_size=sweep_chunk_size,
                                   even_extension=even_extension)
 
-    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk, even_extension)
+    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk, Pe, even_extension)
 end
