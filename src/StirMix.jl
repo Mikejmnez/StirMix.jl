@@ -4,10 +4,12 @@ module StirMix
 using ProgressMeter
 using FFTW
 using HillFunctions
+using JLD2
 using LinearAlgebra
 
 include("types.jl")
 include("domain.jl")
+include("spectral_io.jl")
 include("spectral.jl")
 include("evolution.jl")
 include("flow.jl")

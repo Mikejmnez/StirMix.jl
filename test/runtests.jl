@@ -1,4 +1,5 @@
 using StirMix
+using JLD2
 using Test
 
 struct ProgressTestTimes{T}
@@ -7,6 +8,16 @@ struct ProgressTestTimes{T}
 end
 
 ProgressTestTimes(values; delay=0.12) = ProgressTestTimes(collect(values), delay)
+
+struct SparseTestEntries{T} <: AbstractVector{T}
+    len::Int
+    entries::Dict{Int,T}
+end
+
+Base.size(entries::SparseTestEntries) = (entries.len,)
+Base.IndexStyle(::Type{<:SparseTestEntries}) = IndexLinear()
+Base.getindex(entries::SparseTestEntries, i::Int) = entries.entries[i]
+Base.eachindex(entries::SparseTestEntries) = sort!(collect(keys(entries.entries)))
 
 Base.length(tvals::ProgressTestTimes) = length(tvals.values)
 
@@ -133,6 +144,210 @@ end
                                                   show_progress=:false,
                                                   precision_policy=:float64,
                                                   sweep_chunk_size=0)
+    end
+
+    @testset "spectral basis local file I/O" begin
+        tmp = mktempdir()
+        even_path = joinpath(tmp, "spectral-even.jld2")
+        odd_path = joinpath(tmp, "spectral-odd.jld2")
+        compute_path = joinpath(tmp, "spectral-compute.jld2")
+
+        written_even = spectral_basis(:cos, Pe, dom, 10;
+                                      show_progress=false,
+                                      filename=even_path,
+                                      spectral_io=:write)
+        @test isfile(even_path)
+
+        read_even = spectral_basis(:cos, Pe_large, dom, 10;
+                                   show_progress=false,
+                                   filename=even_path,
+                                   spectral_io=:read)
+        @test read_even.qs == written_even.qs
+        @test read_even.β0 == written_even.β0
+        @test read_even.β == written_even.β
+        @test read_even.an == written_even.an
+        @test read_even.Ak == written_even.Ak
+        @test read_even.bn === nothing
+        @test read_even.Bk === nothing
+        @test read_even.Pe == written_even.Pe
+        @test read_even.even_extension == written_even.even_extension
+
+        compute_only = spectral_basis(:cos, Pe, dom, 10;
+                                      show_progress=false,
+                                      filename=compute_path,
+                                      spectral_io=:compute)
+        @test length(compute_only.qs) == length(dom.K)
+        @test !isfile(compute_path)
+
+        written_odd = spectral_basis(:cos, Pe, dom, 10;
+                                     show_progress=false,
+                                     compute_odd=true,
+                                     filename=odd_path,
+                                     spectral_io=:refresh)
+        @test isfile(odd_path)
+
+        read_odd = spectral_basis(:cos, Pe_large, dom, 10;
+                                  show_progress=false,
+                                  filename=odd_path,
+                                  spectral_io="read")
+        @test read_odd.qs == written_odd.qs
+        @test read_odd.an == written_odd.an
+        @test read_odd.Ak == written_odd.Ak
+        @test read_odd.bn == written_odd.bn
+        @test read_odd.Bk == written_odd.Bk
+
+        # test that errs when file not there.
+        @test_throws ArgumentError spectral_basis(:cos, Pe, dom, 10;
+                                                  show_progress=false,
+                                                  filename=joinpath(tmp, "missing.jld2"),
+                                                  spectral_io=:read)
+
+        # test that filename is required
+        @test_throws ArgumentError spectral_basis(:cos, Pe, dom, 10;
+                                                  show_progress=false,
+                                                  spectral_io=:write)
+    end
+
+    @testset "spectral I/O helper behavior" begin
+        tmp = mktempdir()
+
+        path, mode = StirMix._normalize_spectral_io(nothing, :compute)
+        @test path === nothing
+        @test mode === :compute
+
+        path, mode = StirMix._normalize_spectral_io(SubString("basis.jld2", 1, 10), "read")
+        @test path == "basis.jld2"
+        @test mode === :read
+
+        @test_throws ArgumentError StirMix._normalize_spectral_io(nothing, :read)
+        @test_throws ArgumentError StirMix._normalize_spectral_io("", :read)
+        @test_throws ArgumentError StirMix._normalize_spectral_io(10, :read)
+        # the behavior below is not yet supported
+        @test_throws ArgumentError StirMix._normalize_spectral_io("basis.jld2", :reuse)
+
+        _, β0, β, even_extension = StirMix.flow_decomposition(:cos, dom)
+        meta = StirMix._spectral_io_metadata(dom, Pe, nothing, β0, β;
+                                             precision_policy=:mixed,
+                                             qc0=5000,
+                                             qc=15000,
+                                             compute_odd=true,
+                                             even_extension=even_extension)
+        @test meta.Pe == Float64(Pe)
+        @test meta.Ns === nothing
+        @test meta.precision_policy == "mixed"
+        @test meta.qc0 == 5000
+        @test meta.qc == 15000
+        @test meta.compute_odd === true
+        @test meta.even_extension == even_extension
+        @test meta.K == dom.K
+        @test meta.K !== dom.K
+        @test meta.beta == β
+        @test meta.beta !== β
+        @test meta.bigfloat_precision_bits_at_write == precision(BigFloat)
+
+        optional_path = joinpath(tmp, "optional-meta.jld2")
+        jldopen(optional_path, "w") do f
+            StirMix._write_optional_meta!(f, "qc", nothing)
+            StirMix._write_optional_meta!(f, "Ns", 10)
+        end
+        jldopen(optional_path, "r") do f
+            @test f["meta/qc_isnothing"] === true
+            @test !haskey(f, "meta/qc")
+            @test f["meta/Ns_isnothing"] === false
+            @test f["meta/Ns"] == 10
+        end
+
+        entries_path = joinpath(tmp, "entries.jld2")
+        values = Any[ComplexF64[1], ComplexF64[2, 3]]
+        jldopen(entries_path, "w") do f
+            StirMix._write_spectral_entries!(f, "vals", values)
+        end
+        jldopen(entries_path, "r") do f
+            @test StirMix._spectral_entry_key("vals", 2) == "data/vals/000002"
+            @test StirMix._spectral_entry_key_width(2) == 6
+            @test f["data/vals/length"] == 2
+            @test f["data/vals/key_width"] == 6
+            @test StirMix._read_spectral_entries(f, "vals", 2) == values
+            @test_throws ArgumentError StirMix._read_spectral_entries(f, "vals", 3)
+        end
+        # this test if for when there are a lot of q-entries being stored
+        # necessary since writing q-entries pads with 6 zeros the keys by default
+        wide_entries_path = joinpath(tmp, "wide-entries.jld2")
+        wide_values = SparseTestEntries(1_000_000, Dict(1 => "first", 1_000_000 => "last"))
+        jldopen(wide_entries_path, "w") do f
+            StirMix._write_spectral_entries!(f, "wide", wide_values)
+        end
+        jldopen(wide_entries_path, "r") do f
+            @test StirMix._spectral_entry_key_width(999_999) == 6
+            @test StirMix._spectral_entry_key_width(1_000_000) == 7
+            @test StirMix._spectral_entry_key("wide", 1, 7) == "data/wide/0000001"
+            @test f["data/wide/length"] == 1_000_000
+            @test f["data/wide/key_width"] == 7
+            @test f["data/wide/0000001"] == "first"
+            @test f["data/wide/1000000"] == "last"
+            @test !haskey(f, "data/wide/000001")
+        end
+
+        legacy_entries_path = joinpath(tmp, "legacy-entries.jld2")
+        jldopen(legacy_entries_path, "w") do f
+            f["data/legacy/length"] = 2
+            f["data/legacy/000001"] = "old-first"
+            f["data/legacy/000002"] = "old-second"
+        end
+        jldopen(legacy_entries_path, "r") do f
+            @test !haskey(f, "data/legacy/key_width")
+            @test StirMix._read_spectral_entries(f, "legacy", 2) == Any["old-first", "old-second"]
+        end
+
+        basis = StirMix.SpectralBasis(
+            Any[0.0 + 0.0im, 1.0im],
+            1.0,
+            [-0.5],
+            Any[ComplexF64[1], ComplexF64[2, 3]],
+            Any[ComplexF64[4], ComplexF64[5, 6]],
+            Any[reshape(ComplexF64[1], 1, 1), ComplexF64[1 0; 0 1]],
+            Any[reshape(ComplexF64[1], 1, 1), ComplexF64[0 1; 1 0]],
+            Pe,
+            false,
+        )
+
+        spectral_path = joinpath(tmp, "nested", "basis.jld2")
+        StirMix._write_spectral_data(spectral_path, basis, meta)
+        @test isfile(spectral_path)
+
+        jldopen(spectral_path, "r") do f
+            @test f["meta/schema_version"] == StirMix._SPECTRAL_DATA_SCHEMA_VERSION
+            @test f["meta/Ns_isnothing"] === true
+            @test f["meta/precision_policy"] == "mixed"
+            @test f["data/nk"] == 2
+            @test f["data/has_odd"] === true
+            @test f["data/an/length"] == 2
+            @test haskey(f, "data/Bk/000002")
+        end
+
+        loaded = StirMix._read_spectral_data(spectral_path)
+        @test loaded.qs == basis.qs
+        @test loaded.β0 == basis.β0
+        # β is reconstructed from metadata, not from a raw serialized basis field.
+        @test loaded.β == meta.beta
+        @test loaded.an == basis.an
+        @test loaded.bn == basis.bn
+        @test loaded.Ak == basis.Ak
+        @test loaded.Bk == basis.Bk
+        @test loaded.Pe == basis.Pe
+        @test loaded.even_extension == basis.even_extension
+
+        malformed_path = joinpath(tmp, "malformed.jld2")
+        jldopen(malformed_path, "w") do f
+            f["data/nk"] = 1
+            f["data/has_odd"] = false
+            f["data/qs/000001"] = 0.0 + 0.0im
+            f["meta/beta0"] = 1.0
+            f["meta/beta"] = [-0.5]
+            f["meta/Pe"] = Pe
+            f["meta/even_extension"] = false
+        end
+        @test_throws ArgumentError StirMix._read_spectral_data(malformed_path)
     end
 
     @testset "averaged preparation reuses mixed spectral data" begin

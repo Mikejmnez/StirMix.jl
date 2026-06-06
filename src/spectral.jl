@@ -140,14 +140,19 @@ end
 
 function _q_values(K::AbstractVector, Pe::Real; 
                   precision_policy=:mixed, 
-                  qc1::Union{Nothing,Real}=nothing, 
-                  qc2::Union{Nothing,Real}=nothing)
+                  qc0::Union{Nothing,Real}=nothing,
+                  qc::Union{Nothing,Real}=nothing)
     absq = abs.(2 .* (2π * K) .* Pe)
     if precision_policy === :mixed
-        qc1 < qc2 || throw(ArgumentError("qc1 must be less than qc2; got qc1=$qc1, qc2=$qc2"))
-        idx64  = findall(absq .< qc1)
-        idxbig     = findall((absq .>= qc1) .& (absq .< qc2))
-        idxHR = findall(absq .>= qc2)
+        qc0 === nothing &&
+            throw(ArgumentError("qc0 is required when precision_policy=:mixed"))
+        qc === nothing &&
+            throw(ArgumentError("qc is required when precision_policy=:mixed"))
+        qc0 < qc || throw(ArgumentError("qc0 must be less than qc; got qc0=$qc0, qc=$qc"))
+
+        idx64 = findall(absq .< qc0)
+        idxbig = findall((absq .>= qc0) .& (absq .< qc))
+        idxHR = findall(absq .>= qc)
 
         qs64 = ComplexF64.(complex.(0.0, 2 .* (2π * K[idx64]) .* Pe))
 
@@ -331,7 +336,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
     bn = compute_odd ? Vector{Any}(undef, nk) : nothing
     Bk = compute_odd ? Vector{Any}(undef, nk) : nothing
 
-    qdata = _q_values(fac .* domain.K, Pe; precision_policy=precision_policy, qc1=qc0, qc2=qc)
+    qdata = _q_values(fac .* domain.K, Pe; precision_policy=precision_policy, qc0=qc0, qc=qc)
 
     # create one progress bar here
     nq = nk
@@ -402,8 +407,24 @@ end
 
 
 """
+    spectral_basis(U, Pe, domain, Ns;
+                   precision_policy=:float64,
+                   qc0=1000.0,
+                   qc=nothing,
+                   compute_odd=false,
+                   parallel=true,
+                   show_progress=true,
+                   sweep_chunk_size=nothing,
+                   filename=nothing,
+                   spectral_io=:compute)
+
 Collect eigenpairs for the alongstream wavenumber sweep.
 
+When `filename` is provided, `spectral_io` controls local spectral-data I/O:
+`:compute` ignores disk, `:read` returns data from `filename`, and `:write` or
+`:refresh` compute the basis and then write it to `filename`. Phase 1 read mode
+checks only that the expected datasets exist; it does not validate stored
+metadata against the current arguments.
 
 """
 function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
@@ -412,7 +433,12 @@ function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
                         compute_odd::Bool=false,
                         parallel::Bool = true,
                         show_progress::Bool=true, 
-                        sweep_chunk_size::Union{Nothing,Integer}=nothing)
+                        sweep_chunk_size::Union{Nothing,Integer}=nothing,
+                        filename=nothing,
+                        spectral_io=:compute)
+    spectral_path, spectral_mode = _normalize_spectral_io(filename, spectral_io)
+    spectral_mode === :read && return _read_spectral_data(spectral_path)
+
     _, β0, β, even_extension = flow_decomposition(U, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
                                   precision_policy=precision_policy, qc0=qc0, qc=qc,
@@ -422,13 +448,39 @@ function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
                                   sweep_chunk_size=sweep_chunk_size,
                                   even_extension=even_extension)
 
-    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk, Pe, even_extension)
+    basis = SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk, Pe, even_extension)
+    if spectral_mode in (:write, :refresh)
+        meta = _spectral_io_metadata(domain, Pe, Ns, β0, β;
+                                     precision_policy=precision_policy,
+                                     qc0=qc0,
+                                     qc=qc,
+                                     compute_odd=compute_odd,
+                                     even_extension=even_extension)
+        _write_spectral_data(spectral_path, basis, meta)
+    end
+
+    return basis
 end
 
 
 """
+    spectral_basis(flow, Pe, domain, Ns=nothing;
+                   precision_policy=:float64,
+                   qc0=1000.0,
+                   qc=nothing,
+                   compute_odd=false,
+                   parallel=true,
+                   show_progress=true,
+                   sweep_chunk_size=nothing,
+                   filename=nothing,
+                   spectral_io=:compute)
+
 Collect eigenpairs for a predefined flow over the alongstream wavenumber sweep.
 
+`filename` and `spectral_io` have the same behavior as the vector-flow method:
+`:compute` ignores disk, `:read` reconstructs a basis from local spectral data,
+and `:write`/`:refresh` write the computed basis after the existing adaptive
+eigensolve path completes.
 """
 function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns::Union{Nothing,Integer}=nothing;
                         precision_policy=:float64, qc0::Real=1000.0,
@@ -436,7 +488,12 @@ function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns::Union{Nothing,Inte
                         compute_odd::Bool=false,
                         parallel::Bool=true,
                         show_progress::Bool=true, 
-                        sweep_chunk_size::Union{Nothing,Integer}=nothing)
+                        sweep_chunk_size::Union{Nothing,Integer}=nothing,
+                        filename=nothing,
+                        spectral_io=:compute)
+    spectral_path, spectral_mode = _normalize_spectral_io(filename, spectral_io)
+    spectral_mode === :read && return _read_spectral_data(spectral_path)
+
     _, β0, β, even_extension = flow_decomposition(flow, domain)
     if even_extension
         compute_odd = true
@@ -450,5 +507,16 @@ function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns::Union{Nothing,Inte
                                   sweep_chunk_size=sweep_chunk_size,
                                   even_extension=even_extension)
 
-    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk, Pe, even_extension)
+    basis = SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk, Pe, even_extension)
+    if spectral_mode in (:write, :refresh)
+        meta = _spectral_io_metadata(domain, Pe, Ns, β0, β;
+                                     precision_policy=precision_policy,
+                                     qc0=qc0,
+                                     qc=qc,
+                                     compute_odd=compute_odd,
+                                     even_extension=even_extension)
+        _write_spectral_data(spectral_path, basis, meta)
+    end
+
+    return basis
 end
