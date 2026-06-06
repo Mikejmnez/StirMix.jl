@@ -45,7 +45,7 @@ end
         mixed_basis = spectral_basis(:cos, Pe_large, dom, 10;
                                      show_progress=false,
                                      precision_policy=:mixed, 
-                                     qc1=5000, qc2=12000)
+                                     qc0=5000, qc=12000)
         @test any(q -> q isa ComplexF64, mixed_basis.qs)
         @test any(q -> q isa Complex{BigFloat}, mixed_basis.qs)
 
@@ -73,7 +73,7 @@ end
             redirect_stderr(devnull) do
                 spectral_basis(:cos, Pe_large, dom, 10;
                                precision_policy=:mixed,
-                               qc1=5000, qc2=15000)
+                               qc0=5000, qc=15000)
             end
         end
 
@@ -109,14 +109,14 @@ end
 
         mixed_serial = spectral_basis(:cos, Pe_large, dom, 10;
                                       precision_policy=:mixed,
-                                      qc1=5000, qc2=15000,
+                                      qc0=5000, qc=15000,
                                       parallel=false,
                                       sweep_chunk_size=2,
                                       show_progress=false,
                                       compute_odd=true)
         mixed_parallel = spectral_basis(:cos, Pe_large, dom, 10;
                                         precision_policy=:mixed,
-                                        qc1=5000, qc2=15000,
+                                        qc0=5000, qc=15000,
                                         parallel=true,
                                         sweep_chunk_size=2,
                                         show_progress=false,
@@ -143,12 +143,8 @@ end
                                show_progress=false)
         @test size(field) == (1, length(dom.y), length(dom.x))
 
-        # prep = prepare_explicit_avg(dom, :cos, fy_even, 1000.0, 10;
-        #                             precision_policy=:mixed,
-        #                             qc1=5000, qc2 = 15000,
-        #                             show_progress=false)
         basis = spectral_basis(:cos, Pe_large, dom, 10; precision_policy=:mixed,
-                                     qc1=5000, qc2 = 15000,
+                                     qc0=5000, qc = 15000,
                                      compute_odd=false,
                                      show_progress=false)
         avg_field = evolve_explicit_avg(dom, basis, fy_even, ccoeffs, [0.1]; 
@@ -241,14 +237,14 @@ end
         basis_coeff = spectral_basis(:cos, Pe, dom, 4;
                                      precision_policy=:mixed,
                                      show_progress=false,
-                                     qc1=0.0,
-                                     qc2=1.0e3,
+                                     qc0=0.0,
+                                     qc=1.0e3,
                                      compute_odd=false)
         basis_odd_coeff = spectral_basis(:cos, Pe, dom, 4;
                                          precision_policy=:mixed,
                                          show_progress=false,
-                                         qc1=0.0,
-                                         qc2=1.0e3,
+                                         qc0=0.0,
+                                         qc=1.0e3,
                                          compute_odd=true)
 
         field_coeff = solve_explicit(dom, basis_coeff, fy_even, ccoeffs,

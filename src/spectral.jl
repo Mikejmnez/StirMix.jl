@@ -313,8 +313,8 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
                                 precision_policy=:float64,
                                 parallel::Bool=true,
                                 show_progress::Bool=true,
-                                qc1::Union{Nothing,Real}=nothing, 
-                                qc2::Union{Nothing,Real}=nothing,
+                                qc0::Union{Nothing,Real}=nothing, 
+                                qc::Union{Nothing,Real}=nothing,
                                 compute_odd::Bool=true, 
                                 sweep_chunk_size::Union{Nothing,Integer}=nothing,
                                 even_extension::Bool=false)
@@ -331,7 +331,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
     bn = compute_odd ? Vector{Any}(undef, nk) : nothing
     Bk = compute_odd ? Vector{Any}(undef, nk) : nothing
 
-    qdata = _q_values(fac .* domain.K, Pe; precision_policy=precision_policy, qc1=qc1, qc2=qc2)
+    qdata = _q_values(fac .* domain.K, Pe; precision_policy=precision_policy, qc1=qc0, qc2=qc)
 
     # create one progress bar here
     nq = nk
@@ -407,22 +407,22 @@ Collect eigenpairs for the alongstream wavenumber sweep.
 
 """
 function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
-                        precision_policy=:float64, qc1::Union{Nothing,Real}=nothing, 
-                        qc2::Union{Nothing,Real}=nothing,
+                        precision_policy=:float64, qc0::Real=1000.0, 
+                        qc::Union{Nothing,Real}=nothing,
                         compute_odd::Bool=false,
                         parallel::Bool = true,
                         show_progress::Bool=true, 
                         sweep_chunk_size::Union{Nothing,Integer}=nothing)
     _, β0, β, even_extension = flow_decomposition(U, domain)
     data = _collect_spectral_data(domain, Pe, Ns, β;
-                                  precision_policy=precision_policy, qc1=qc1, qc2=qc2,
+                                  precision_policy=precision_policy, qc0=qc0, qc=qc,
                                   parallel=parallel,
                                   show_progress=show_progress,
                                   compute_odd=compute_odd,
                                   sweep_chunk_size=sweep_chunk_size,
                                   even_extension=even_extension)
 
-    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk, even_extension)
+    return SpectralBasis(data.qs, β0, β, data.an, data.bn, data.Ak, data.Bk, Pe, even_extension)
 end
 
 
@@ -431,8 +431,8 @@ Collect eigenpairs for a predefined flow over the alongstream wavenumber sweep.
 
 """
 function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns::Union{Nothing,Integer}=nothing;
-                        precision_policy=:float64, qc1::Union{Nothing,Real}=nothing,
-                        qc2::Union{Nothing,Real}=nothing,
+                        precision_policy=:float64, qc0::Real=1000.0,
+                        qc::Union{Nothing,Real}=nothing,
                         compute_odd::Bool=false,
                         parallel::Bool=true,
                         show_progress::Bool=true, 
@@ -443,7 +443,7 @@ function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns::Union{Nothing,Inte
     end
 
     data = _collect_spectral_data(domain, Pe, Ns, β;
-                                  precision_policy=precision_policy, qc1=qc1, qc2=qc2, 
+                                  precision_policy=precision_policy, qc0=qc0, qc=qc, 
                                   parallel=parallel,
                                   show_progress=show_progress,
                                   compute_odd=compute_odd,
