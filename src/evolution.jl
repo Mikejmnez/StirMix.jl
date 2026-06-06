@@ -31,13 +31,16 @@ function _sine_y_basis(y::AbstractVector, R::Integer)
     return B
 end
 
-function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k)
+function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
     Ak = basis.Ak[k]
 
     R, Nn = size(Ak)
     Kk = 2π * dom.K[k]
-    βshift = im * (Float64(basis.β0) / 2) * Kk * Float64(Pe)
-
+    if β0 === nothing
+        βshift = im * (Float64(basis.β0) / 2) * Kk * Float64(Pe)
+    else
+        βshift = im * (Float64(β0) / 2) * Kk * Float64(Pe)
+    end
     λ = ComplexF64.(basis.an[k])
     @. λ =  λ / 4 + Kk^2 + βshift
 
@@ -109,14 +112,14 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k)
 end
 
 
-function _prepare_coefficient_mode_work(dom, basis, γ, γ_o, Pe)
+function _prepare_coefficient_mode_work(dom, basis, γ, γ_o, Pe, β0)
     any(γ_o .> 1e-6) && _require_basis_odd_coefficients(basis)
 
     nk = length(dom.K)
     work = Vector{Any}(undef, nk)
 
     for k in 1:nk
-        work[k] = _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k)
+        work[k] = _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
     end
 
     return work
@@ -278,6 +281,7 @@ end
 
 function solve_explicit(dom, basis, fy, Ccoeffs, tvals;
                         t0::Real=0.0,
+                        β0::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true,
                         parallel::Bool=true)
 
@@ -341,7 +345,7 @@ function solve_explicit(dom, basis, fy, Ccoeffs, tvals;
             FFTW.set_num_threads(Threads.nthreads())
         end
 
-        work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe)
+        work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0)
         spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
         field = Matrix{Float64}(undef, ny, nx)
         xplan = plan_irfft(spectrum, nx, 2)
@@ -404,6 +408,7 @@ end
 
 
 function evolve_explicit_avg(dom, basis, fy, Ccoeffs, tvals;
+                             β0::Union{Nothing, Real}=nothing,
                              show_progress::Bool=true,
                              parallel::Bool=true)
 
@@ -429,9 +434,11 @@ function evolve_explicit_avg(dom, basis, fy, Ccoeffs, tvals;
     spec = zeros(ComplexF64, nx ÷ 2 + 1)
 
     x0 = dom.x[1]
-
-    work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, basis.β0, basis.Pe)
-
+    if β0===nothing
+        work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, basis.β0, basis.Pe)
+    else
+        work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, β0, basis.Pe)
+    end
     # define progressmeter instance
     p = show_progress && nt > 0 ?
         Progress(nt; desc="Computing time-evolving solution") :

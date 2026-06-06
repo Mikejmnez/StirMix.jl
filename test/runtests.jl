@@ -550,6 +550,10 @@ end
         dom = domain(L, M, Nx, Ny)
         tvals = range(0, .01, 2)
 
+        # this is optional - can overwrite the pre-computed flow average
+        newβ0 = 0
+
+
         # ==================================
         # Initial condition in cross-stream direction
         # ==================================
@@ -567,9 +571,13 @@ end
                                   show_progress=false, parallel=false)
         T_parallel = solve_explicit(dom, basis, g, Ccoeffs, tvals;
                                   show_progress=false)
+        T_zero_ave_flow = solve_explicit(dom, basis, g, Ccoeffs, tvals;
+                                    β0=newβ0, # <---- can manually specify cross-stream flow average
+                                  show_progress=false)
 
         # check initial condition in y direction
         @test isapprox(T_serial[1,:,:], T_parallel[1,:,:]; atol=1e-7)
+        @test isapprox(T_serial[1,:,:], T_zero_ave_flow[1,:,:]; atol=1e-7)
         @test isapprox(T_serial[1, :, 5], g; atol=1e-2,  rtol = 1e-4)
 
     end
@@ -581,6 +589,8 @@ end
         L  = 1
         dom = domain(L, M, Nx, Ny)
         tvals = range(0, .01, 2)
+        # this is optional - can overwrite the pre-computed flow average
+        newβ0 = 0
 
         # ==================================
         # Initial condition in cross-stream direction
@@ -599,9 +609,15 @@ end
                                   show_progress=false, parallel=false)
         T_parallel = solve_explicit(dom, basis, g, Ccoeffs, tvals;
                                     show_progress=false)
+        T_zero_ave_flow = solve_explicit(dom, basis, g, Ccoeffs, tvals;
+                                    β0=newβ0, # <---- can manually specify cross-stream flow average
+                                    show_progress=false)
 
+                                    
         # check initial condition in y direction
         @test isapprox(T_serial[1,:,:], T_parallel[1,:,:]; atol=1e-7)
+        @test isapprox(T_serial[1,:,:], T_zero_ave_flow[1,:,:]; atol=1e-7)
+
         @test isapprox(T_serial[1, 5, :], f; atol=1e-2,  rtol = 1e-4)
 
     end
