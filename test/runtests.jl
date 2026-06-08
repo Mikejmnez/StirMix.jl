@@ -158,6 +158,39 @@ end
                                       spectral_io=:write)
         @test isfile(even_path)
 
+        even_meta = StirMix.open_metadata(even_path)
+        @test even_meta.schema_version == StirMix._SPECTRAL_DATA_SCHEMA_VERSION
+        @test even_meta.Pe == Float64(Pe)
+        @test even_meta.Ns == 10
+        @test even_meta.precision_policy === :float64
+        @test even_meta.qc0 == 1000.0
+        @test even_meta.qc === nothing
+        @test even_meta.compute_odd === false
+        @test even_meta.even_extension === false
+        @test even_meta.nk == length(dom.K)
+        @test even_meta.has_odd === false
+        @test even_meta.key_widths == (qs=6, an=6, Ak=6)
+        @test even_meta.domain_L == dom.L
+        @test even_meta.domain_M == dom.M
+        @test even_meta.domain_Nx == dom.Nx
+        @test even_meta.domain_Ny == dom.Ny
+        @test even_meta.K == dom.K
+        @test even_meta.beta0 == written_even.β0
+        @test even_meta.beta == written_even.β
+        @test even_meta.bigfloat_precision_bits_at_write == precision(BigFloat)
+
+        metadata_domain = domain(even_meta.domain_L, even_meta.domain_M,
+                                 even_meta.domain_Nx, even_meta.domain_Ny)
+        @test metadata_domain.K == even_meta.K
+
+        metadata_basis = spectral_basis(:cos, even_meta.Pe, metadata_domain, even_meta.Ns;
+                                        show_progress=false,
+                                        filename=even_path,
+                                        spectral_io=:read)
+        @test metadata_basis.qs == written_even.qs
+        @test metadata_basis.an == written_even.an
+        @test metadata_basis.Ak == written_even.Ak
+
         read_even = spectral_basis(:cos, Pe_large, dom, 10;
                                    show_progress=false,
                                    filename=even_path,
@@ -185,6 +218,10 @@ end
                                      filename=odd_path,
                                      spectral_io=:refresh)
         @test isfile(odd_path)
+        odd_meta = StirMix.open_metadata(odd_path)
+        @test odd_meta.compute_odd === true
+        @test odd_meta.has_odd === true
+        @test odd_meta.key_widths == (qs=6, an=6, Ak=6, bn=6, Bk=6)
 
         read_odd = spectral_basis(:cos, Pe_large, dom, 10;
                                   show_progress=false,
@@ -201,6 +238,7 @@ end
                                                   show_progress=false,
                                                   filename=joinpath(tmp, "missing.jld2"),
                                                   spectral_io=:read)
+        @test_throws ArgumentError StirMix.open_metadata(joinpath(tmp, "missing-metadata.jld2"))
 
         # test that filename is required
         @test_throws ArgumentError spectral_basis(:cos, Pe, dom, 10;

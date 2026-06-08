@@ -150,6 +150,17 @@ function _require_spectral_key(f, key::AbstractString)
     return f[key]
 end
 
+function _read_optional_meta(f, key::AbstractString)
+    isnothing_key = "meta/$(key)_isnothing"
+    Bool(_require_spectral_key(f, isnothing_key)) && return nothing
+    return _require_spectral_key(f, "meta/$key")
+end
+
+function _read_spectral_key_width(f, name::AbstractString)
+    width_key = "data/$name/key_width"
+    return haskey(f, width_key) ? Int(f[width_key]) : 6
+end
+
 """
     _read_spectral_entries(file, name, n) -> Vector{Any}
 
@@ -162,12 +173,69 @@ the original width of 6.
 """
 function _read_spectral_entries(f, name::AbstractString, n::Integer)
     values = Vector{Any}(undef, n)
-    width_key = "data/$name/key_width"
-    width = haskey(f, width_key) ? Int(f[width_key]) : 6
+    width = _read_spectral_key_width(f, name)
     for k in 1:n
         values[k] = _require_spectral_key(f, _spectral_entry_key(name, k, width))
     end
     return values
+end
+
+"""
+    open_metadata(filename) -> NamedTuple
+
+Read the metadata and storage summary from a local spectral-data JLD2 file.
+
+This is a convenience for inspecting or reusing data written by
+`spectral_basis(...; filename, spectral_io=:write)`. It returns the stored
+call context, including `Pe`, `Ns`, precision settings, domain fields, Fourier
+coefficients, and storage facts such as `nk`, `has_odd`, and per-group
+`key_widths`. Like `spectral_io=:read`, this function only reads what is in the
+file; it does not validate the metadata against a new `spectral_basis` call.
+"""
+function open_metadata(filename::AbstractString)
+    isfile(filename) ||
+        throw(ArgumentError("filename does not exist: $filename"))
+
+    return jldopen(filename, "r") do f
+        has_odd = Bool(_require_spectral_key(f, "data/has_odd"))
+        key_widths = has_odd ?
+            (;
+                qs=_read_spectral_key_width(f, "qs"),
+                an=_read_spectral_key_width(f, "an"),
+                Ak=_read_spectral_key_width(f, "Ak"),
+                bn=_read_spectral_key_width(f, "bn"),
+                Bk=_read_spectral_key_width(f, "Bk"),
+            ) :
+            (;
+                qs=_read_spectral_key_width(f, "qs"),
+                an=_read_spectral_key_width(f, "an"),
+                Ak=_read_spectral_key_width(f, "Ak"),
+            )
+
+        return (;
+            schema_version=Int(_require_spectral_key(f, "meta/schema_version")),
+            stirmix_version=String(_require_spectral_key(f, "meta/stirmix_version")),
+            julia_version=String(_require_spectral_key(f, "meta/julia_version")),
+            Pe=Float64(_require_spectral_key(f, "meta/Pe")),
+            Ns=_read_optional_meta(f, "Ns"),
+            precision_policy=Symbol(_require_spectral_key(f, "meta/precision_policy")),
+            qc0=_read_optional_meta(f, "qc0"),
+            qc=_read_optional_meta(f, "qc"),
+            compute_odd=Bool(_require_spectral_key(f, "meta/compute_odd")),
+            even_extension=Bool(_require_spectral_key(f, "meta/even_extension")),
+            domain_L=Float64(_require_spectral_key(f, "meta/domain_L")),
+            domain_M=Int(_require_spectral_key(f, "meta/domain_M")),
+            domain_Nx=Int(_require_spectral_key(f, "meta/domain_Nx")),
+            domain_Ny=Int(_require_spectral_key(f, "meta/domain_Ny")),
+            K=Vector{Float64}(_require_spectral_key(f, "meta/K")),
+            beta0=Float64(_require_spectral_key(f, "meta/beta0")),
+            beta=Vector{Float64}(_require_spectral_key(f, "meta/beta")),
+            bigfloat_precision_bits_at_write=Int(_require_spectral_key(f, "meta/bigfloat_precision_bits_at_write")),
+            nk=Int(_require_spectral_key(f, "data/nk")),
+            has_odd=has_odd,
+            key_widths=key_widths,
+        )
+    end
 end
 
 """
