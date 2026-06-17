@@ -2,7 +2,7 @@
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "f8c5a3fdd4aa978b3432a0a4343db0134ad84e8a"
+project_hash = "158a6d40395e1531ae2780fc5b741bff9928e1b3"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -49,9 +49,9 @@ version = "1.0.0"
 
 [[deps.CommonMark]]
 deps = ["PrecompileTools"]
-git-tree-sha1 = "65ea18ada9814f09c5013924c42fe8b53d6ee467"
+git-tree-sha1 = "731edf630eb23140a3c7a2e74d4186f562996d76"
 uuid = "a80b9123-70ca-4bc0-993e-6e3bcb318db6"
-version = "0.10.3"
+version = "1.0.2"
 
     [deps.CommonMark.extensions]
     CommonMarkMarkdownASTExt = "MarkdownAST"
@@ -111,9 +111,9 @@ version = "1.11.0"
 
 [[deps.GenericLinearAlgebra]]
 deps = ["LinearAlgebra", "Printf", "Random", "libblastrampoline_jll"]
-git-tree-sha1 = "fc6236b7fbc40bc283e0dc5a84ead1169a6d7dda"
+git-tree-sha1 = "6a0335feebe8e2b61242f2b4ec165c1b70b83f8a"
 uuid = "14197337-ba66-59df-a3e3-ca00e7dcff7a"
-version = "0.3.19"
+version = "0.4.0"
 
 [[deps.GenericSchur]]
 deps = ["LinearAlgebra", "Printf"]
@@ -122,9 +122,9 @@ uuid = "c145ed77-6b09-5dd9-b285-bf645a82121e"
 version = "0.5.6"
 
 [[deps.Glob]]
-git-tree-sha1 = "83cb0092e2792b9e3a865b6655e88f5b862607e2"
+git-tree-sha1 = "246c628cec062230b7d183aab88841fa94fcabe9"
 uuid = "c27321d9-0574-5035-807b-f59d2c89b15c"
-version = "1.4.0"
+version = "1.5.0"
 
 [[deps.HashArrayMappedTries]]
 git-tree-sha1 = "2eaa69a7cab70a52b9687c8bf950a5a93ec895ae"
@@ -133,7 +133,9 @@ version = "0.2.0"
 
 [[deps.HillFunctions]]
 deps = ["GenericLinearAlgebra", "GenericSchur", "JuliaFormatter", "LinearAlgebra", "SparseArrays"]
-path = "/Users/miguelangeljimenezurias/HillFunctions.jl"
+git-tree-sha1 = "5270733d6b6fc38f3fb91e83da9c9417fe7b0cb1"
+repo-rev = "main"
+repo-url = "https://github.com/Mikejmnez/HillFunctions.jl"
 uuid = "515440f5-9b45-477f-8bae-317e58dd4532"
 version = "0.1.0"
 weakdeps = ["JLD2"]
@@ -146,6 +148,11 @@ deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl"]
 git-tree-sha1 = "ec1debd61c300961f98064cfb21287613ad7f303"
 uuid = "1d5cc7b8-4909-519e-a0f8-d0f5ad9712d0"
 version = "2025.2.0+0"
+
+[[deps.InteractiveUtils]]
+deps = ["Markdown"]
+uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
+version = "1.11.0"
 
 [[deps.JLD2]]
 deps = ["ChunkCodecLibZlib", "ChunkCodecLibZstd", "FileIO", "MacroTools", "Mmap", "OrderedCollections", "PrecompileTools", "ScopedValues"]
@@ -166,15 +173,15 @@ uuid = "692b3bcd-3c85-4b1f-b108-f13ce0eb3210"
 version = "1.7.1"
 
 [[deps.JuliaFormatter]]
-deps = ["CommonMark", "Glob", "JuliaSyntax", "PrecompileTools", "TOML"]
-git-tree-sha1 = "ec5e99ad66c51b6fcd3dbab6655b17118a29a588"
+deps = ["CommonMark", "Glob", "JuliaSyntax", "PrecompileTools", "TOML", "Test"]
+git-tree-sha1 = "35899f07497ccfb55cd2d96c08abba080b59f298"
 uuid = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
-version = "2.3.0"
+version = "2.8.3"
 
 [[deps.JuliaSyntax]]
-git-tree-sha1 = "937da4713526b96ac9a178e2035019d3b78ead4a"
+git-tree-sha1 = "0d4b3dab95018bcf3925204475693d9f09dc45b8"
 uuid = "70703baa-626e-46a2-a12c-08ffd08c73b4"
-version = "0.4.10"
+version = "1.0.2"
 
 [[deps.LazyArtifacts]]
 deps = ["Artifacts", "Pkg"]
@@ -349,6 +356,11 @@ version = "1.0.3"
 deps = ["ArgTools", "SHA"]
 uuid = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
 version = "1.10.0"
+
+[[deps.Test]]
+deps = ["InteractiveUtils", "Logging", "Random", "Serialization"]
+uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+version = "1.11.0"
 
 [[deps.UUIDs]]
 deps = ["Random", "SHA"]
