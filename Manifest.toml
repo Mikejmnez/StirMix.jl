@@ -2,7 +2,7 @@
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "158a6d40395e1531ae2780fc5b741bff9928e1b3"
+project_hash = "931eb6b3e9a933cac0a31bd9ef3b964911e14309"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -89,9 +89,9 @@ version = "1.10.0"
 
 [[deps.FFTW_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "6d6219a004b8cf1e0b4dbe27a2860b8e04eba0be"
+git-tree-sha1 = "6866aec60ef98e3164cd8d6855225684207e9dff"
 uuid = "f5851436-0d7a-5f13-b9de-f02708fd171a"
-version = "3.3.11+0"
+version = "3.3.12+0"
 
 [[deps.FileIO]]
 deps = ["Pkg", "Requires", "UUIDs"]
@@ -133,7 +133,7 @@ version = "0.2.0"
 
 [[deps.HillFunctions]]
 deps = ["GenericLinearAlgebra", "GenericSchur", "JuliaFormatter", "LinearAlgebra", "SparseArrays"]
-git-tree-sha1 = "5270733d6b6fc38f3fb91e83da9c9417fe7b0cb1"
+git-tree-sha1 = "d82bea1e2279d312b513fcce66387b4bee47f0b5"
 repo-rev = "main"
 repo-url = "https://github.com/Mikejmnez/HillFunctions.jl"
 uuid = "515440f5-9b45-477f-8bae-317e58dd4532"
@@ -168,15 +168,15 @@ version = "0.6.4"
 
 [[deps.JLLWrappers]]
 deps = ["Artifacts", "Preferences"]
-git-tree-sha1 = "0533e564aae234aff59ab625543145446d8b6ec2"
+git-tree-sha1 = "7204148362dafe5fe6a273f855b8ccbe4df8173e"
 uuid = "692b3bcd-3c85-4b1f-b108-f13ce0eb3210"
-version = "1.7.1"
+version = "1.8.0"
 
 [[deps.JuliaFormatter]]
 deps = ["CommonMark", "Glob", "JuliaSyntax", "PrecompileTools", "TOML", "Test"]
-git-tree-sha1 = "35899f07497ccfb55cd2d96c08abba080b59f298"
+git-tree-sha1 = "a7f790373ef74e64f176afbe75ece2baf6dfc74d"
 uuid = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
-version = "2.8.3"
+version = "2.8.5"
 
 [[deps.JuliaSyntax]]
 git-tree-sha1 = "0d4b3dab95018bcf3925204475693d9f09dc45b8"
@@ -265,9 +265,9 @@ uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
 version = "0.3.27+1"
 
 [[deps.OrderedCollections]]
-git-tree-sha1 = "05868e21324cede2207c6f0f466b4bfef6d5e7ee"
+git-tree-sha1 = "94ba93778373a53bfd5a0caaf7d809c445292ff4"
 uuid = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
-version = "1.8.1"
+version = "1.8.2"
 
 [[deps.Pkg]]
 deps = ["Artifacts", "Dates", "Downloads", "FileWatching", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "Random", "SHA", "TOML", "Tar", "UUIDs", "p7zip_jll"]
@@ -394,9 +394,9 @@ version = "1.59.0+0"
 
 [[deps.oneTBB_jll]]
 deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl"]
-git-tree-sha1 = "1350188a69a6e46f799d3945beef36435ed7262f"
+git-tree-sha1 = "da8c1f6eee04831f14edcfa5dae611d309807e57"
 uuid = "1317d2d5-d96f-522e-a858-c73665f53c3e"
-version = "2022.0.0+1"
+version = "2022.3.0+0"
 
 [[deps.p7zip_jll]]
 deps = ["Artifacts", "Libdl"]
