@@ -54,6 +54,125 @@ function complex_x_coeffs(ce::AbstractVector, co::AbstractVector)
 end
 
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Internal helper
+# ──────────────────────────────────────────────────────────────────────────────
+
+"""Advance and wrap phi_old to [0, 2π]."""
+function _update_phi_old(phi_old::Real, phi_new::Real)
+    phi_old = phi_old + phi_new
+    if phi_old > 2π
+        phi_old -= 2π
+    elseif phi_old < 0
+        phi_old += 2π
+    end
+    return phi_old
+end
+
+"""
+    coeff_project(phi, y; phi_old=π, phi_new=0.0)
+
+Compute the even and odd Fourier coefficients of the 1-D signal `phi(y)` after
+applying a phase shift `phi_new`.
+
+# Arguments
+- `phi`    : 1-D (complex) vector, `phi = phi(y)`
+- `y`      : 1-D real vector of y in `[0, 2π]` coordinates (uniform spacing)
+- `phi_old`: original centering of the flow (default π)
+- `phi_new`: phase shift of the velocity field (default 0)
+
+# Returns
+- `even_coeffs`: complex vector of length `nL+1` — cosine coefficients `a_l`,
+                 `l = 0, 1, …, nL`
+- `odd_coeffs` : complex vector of length `nL`   — sine  coefficients `b_l`,
+                 `l = 1, 2, …, nL`
+- `phi_new`    : unchanged
+- `phi_old`    : updated phase reference, wrapped to `[0, 2π]`
+
+# Reconstruction
+```
+phi_shifted(y) ≈ Σ_{l=0}^{nL}  even_coeffs[l+1] * cos(l*y)
+               + Σ_{l=1}^{nL}  odd_coeffs[l]    * sin(l*y)
+```
+"""
+function coeff_project(
+    phi::AbstractVector,
+    y::AbstractVector;
+    phi_old::Real = π,
+    phi_new::Real = 0.0,
+)
+    phi_old = _update_phi_old(phi_old, phi_new)
+    L    = length(y)
+    nL   = (L - 1) ÷ 2
+
+    χc_0, χc, γc_o = normal_mode_decomposition(phi, y; Lx=2π)
+
+
+    phi_cos = [cos(-l * phi_new) for l in 1:nL]
+    phi_sin = [sin(-l * phi_new) for l in 1:nL]
+
+    e_coeffs = χc .* phi_cos .- γc_o .* phi_sin
+    e_coeffs = vcat(χc_0, e_coeffs)  # prepend γc_0
+
+    o_coeffs = γc_o .* phi_cos .+ χc .* phi_sin
+
+    return e_coeffs, o_coeffs, phi_new, phi_old
+end
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 2-D method  (y along dimension 1, x along dimension 2)
+# ──────────────────────────────────────────────────────────────────────────────
+
+"""
+    coeff_project(phi, y; phi_old=π, phi_new=0.0)
+
+2-D overload: `phi` has shape `(Ly, Lx)` with the **y-dimension along dim 1**.
+The FFT is applied along dim 1 only; the x-dimension is carried through.
+
+# Returns
+- `even_coeffs`: complex matrix of shape `(nL+1, Lx)` — row index is wavenumber `l`
+- `odd_coeffs` : complex matrix of shape `(nL,   Lx)` — row index is wavenumber `l`
+- `phi_new`, `phi_old`: same semantics as the 1-D method
+
+# Reconstruction (at a fixed x-column `j`)
+```
+phi_shifted(y) ≈ Σ_{l=0}^{nL}  even_coeffs[l+1, j] * cos(l*y)
+               + Σ_{l=1}^{nL}  odd_coeffs[l,   j] * sin(l*y)
+```
+"""
+function coeff_project(
+    phi::AbstractMatrix,
+    y::AbstractVector;
+    phi_old::Real = π,
+    phi_new::Real = 0.0,
+)
+    phi_old = _update_phi_old(phi_old, phi_new)
+
+    L    = length(y)
+    nL   = (L - 1) ÷ 2
+    norm = (y[end] - y[1]) / (2 * (y[2] - y[1]))
+
+    # FFT along dim 1 (the y-axis).  F[k+1, :] ↔ wavenumber k.
+    F = fft(phi, 1)
+
+    F_pos     = F[1:nL+1, :]
+    F_neg_rev = [F[1:1, :]; F[L:-1:L-nL+1, :]]   # (nL+1, Lx)
+
+    e_coeffs = 0.5 .* (F_pos .+ F_neg_rev) ./ norm
+    e_coeffs[1, :] ./= 2
+    o_coeffs = 0.5 .* (F_pos .- F_neg_rev) ./ (-1im * norm)
+
+    # Column vector (nL+1, 1) so it broadcasts against (nL+1, Lx)
+    phi_cos = reshape([cos(-l * phi_new) for l in 0:nL], :, 1)
+    phi_sin = reshape([sin(-l * phi_new) for l in 0:nL], :, 1)
+
+    da_even = e_coeffs .* phi_cos .- o_coeffs .* phi_sin   # (nL+1, Lx)
+    da_odd  = o_coeffs .* phi_cos .+ e_coeffs .* phi_sin   # (nL+1, Lx)
+
+    return da_even, da_odd[2:end, :], phi_new, phi_old
+end
+
 """
     cosine_tail_data(y, γ, Nn)
 
