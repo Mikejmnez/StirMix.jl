@@ -41,18 +41,6 @@ function capture_stderr(f)
     end
 end
 
-function reconstruct_1d(even_coeffs, odd_coeffs, ny)
-    Nr     = length(even_coeffs)          # nL + 1
-    result = zeros(Complex{Float64}, length(ny))
-    for l in 0:Nr-1
-        result .+= even_coeffs[l+1] .* cos.(2*l .* ny)
-    end
-    for l in 1:Nr-1
-        result .+= odd_coeffs[l] .* sin.(2*l .* ny)
-    end
-    return real.(result)
-end
-
 @testset "StirMix.jl" begin
     dom = domain(pi, 1, 8, 50)
     fy_odd = @. sin.(2dom.y)
@@ -689,22 +677,44 @@ end
     end
 
 
-    @testset "y function 1D projection" begin
-        dom = domain(1, 1, 8, 500)
+    @testset "y function 1D projection: Case1 " begin
+        dom = domain(1, 1, 8, 501)
         Ld1 = 1.0 / 8.0
-        phi_new = pi/2
-        phi_old = pi
-        Phi     = exp.(-0.5 .* (2dom.y .- phi_old).^2 ./ (0.5 * Ld1^2))
+        @testset "Case 1: phi_new=π/2 phi_old=π" begin
+            phi_new = 0.5*π
+            phi_old = π
+            Phi     = exp.(-0.5 .* (2dom.y .- phi_old).^2 ./ (0.5 * Ld1^2))
+            expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)).^2 ./ (0.5 * Ld1^2))
+            even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(Phi, dom.y; phi_new = phi_new, phi_old = phi_old)
+            reconstructed = StirMix.reconstruct_fourier_series(collect(2*dom.y), even_c[1], even_c[2:end], odd_c; Lx=2*π)
+            @test isapprox(reconstructed, expected; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_new, phi_old - phi_new; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_old, phi_old + phi_new; atol=1e-4, rtol=1e-4)
+        end
+        @testset "Case 2: phi_new=π/4 phi_old=π/2" begin
+            phi_new = 0.25*π
+            phi_old = 0.5*π
+            Phi     = exp.(-0.5 .* (2dom.y .- phi_old).^2 ./ (0.5 * Ld1^2))
+            expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)).^2 ./ (0.5 * Ld1^2))
+            even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(Phi, dom.y; phi_new = phi_new, phi_old = phi_old)
+            reconstructed = StirMix.reconstruct_fourier_series(collect(2*dom.y), even_c[1], even_c[2:end], odd_c; Lx=2*π)
+            @test isapprox(reconstructed, expected; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_new, phi_old - phi_new; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_old, phi_old + phi_new; atol=1e-4, rtol=1e-4)
+        end
 
-        expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)).^2 ./ (0.5 * Ld1^2))
+        @testset "Case 3: phi_new=π phi_old=π" begin
+            phi_new = π
+            phi_old = π
+            Phi     = exp.(-0.5 .* (2dom.y .- phi_old).^2 ./ (0.5 * Ld1^2))
+            expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)).^2 ./ (0.5 * Ld1^2)) + exp.(-0.5 .* (2dom.y .- 2π).^2 ./ (0.5 * Ld1^2))
 
-        even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(Phi, dom.y; phi_new = phi_new, phi_old = phi_old)
-
-        reconstructed = reconstruct_1d(even_c, odd_c, dom.y)
-        @test isapprox(reconstructed, expected; atol=1e-4, rtol=1e-4)
-        @test isapprox(nphi_new, phi_old - phi_new; atol=1e-4, rtol=1e-4)
-        @test isapprox(nphi_old, phi_old + phi_new; atol=1e-4, rtol=1e-4)
-
+            even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(Phi, dom.y; phi_new = phi_new)
+            reconstructed = StirMix.reconstruct_fourier_series(collect(2*dom.y), even_c[1], even_c[2:end], odd_c; Lx=2*π)
+            @test isapprox(reconstructed, expected; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_new, π; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_old, 2*π; atol=1e-4, rtol=1e-4)
+        end
     end
 
 end
