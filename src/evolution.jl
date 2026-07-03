@@ -112,7 +112,7 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
 end
 
 
-function _prepare_coefficient_mode_work(dom, basis, γ, γ_o, Pe, β0)
+function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::Vector{Float64}, γ_o::Vector{Float64}, Pe::Real, β0::Union{Nothing, Real})
     any(γ_o .> 1e-6) && _require_basis_odd_coefficients(basis)
 
     nk = length(dom.K)
