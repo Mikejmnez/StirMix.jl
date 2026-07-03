@@ -412,10 +412,9 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
     Ces = hcat(c0_2D ./ 2, StirMix.complex_x_coeffs(ce_2D, co_2D))
     χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(Ces, 2*dom.y; Lx=2π, dim=1)
     ny = length(dom.y)
-    γ = vcat(χ_0', χ_e)
+    γ = vcat(transpose(χ_0), χ_e)
     _dom = dom
 
-    # _dom = dom # only relevant when even extension
     Pe = basis.Pe 
     # identify to reuse function
     Ccoeffs = ones(ComplexF64, length(dom.K))
