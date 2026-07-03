@@ -768,4 +768,48 @@ end
         end
     end
 
+    @testset "2D IVP" begin
+        Pe = 1
+        Nx = 1000
+        Ny = 150
+        M  = 1
+        L  = 100
+        dom = domain(L, M, Nx, Ny)
+        tvals = [0.0, 0.1]
+        basis = spectral_basis(:cos, Pe, dom, 100; compute_odd=true, show_progress=false)
+        @testset "Case 1: separable gaussian stripe IVP" begin
+            # Initial condition in cross-stream direction
+            σ2_y0 = 1000
+            g = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2))
+            σ2_x = 10
+            X0 =0 
+            f = @. exp(-((dom.x-X0)/sqrt(2*σ2_x)).^2)
+            # get 2D initial condition from separable components
+            Z = g * transpose(f)
+
+            T = solve_explicit(dom, basis, Z, tvals; β0=0)
+            @test size(T) == (length(tvals), length(dom.y), length(dom.x))
+            @test isapprox(T[1, :, :], Z; atol=1e-3, rtol=1e-3)
+        end
+        @testset "Case 2: non-separable IVP" begin
+            σ2_y0 = 1/5
+            g = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2))
+            σ2_x = 50
+            X0 =0 
+            f = @. exp(-((dom.x-X0)/sqrt(2*σ2_x)).^2)
+            # get 2D initial condition from separable components
+            Z = g * transpose(f)
+            f1 = @. cos(pi* dom.x /(L/2)) - sin(pi* dom.x /(L/4))
+            f2 = @. sin(pi* dom.x /(L/2)) + cos(pi* dom.x /(L/4))
+            g1 = @. cos(2pi* dom.y)
+            g2 = @. sin(2pi* dom.y)
+            Z1 = g1 * f1'
+            Z2 = g2 * f2'
+            Zn = Z .* (Z1 + Z2)
+            T = solve_explicit(dom, basis, Zn, tvals; β0=0)
+            @test size(T) == (length(tvals), length(dom.y), length(dom.x))
+            @test isapprox(T[1, :, :], Zn; atol=1e-4, rtol=1e-1)
+        end
+    end
+
 end

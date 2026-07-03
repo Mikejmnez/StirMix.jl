@@ -75,7 +75,7 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
     f_o = nothing
     tail_o = nothing
 
-    if any(γ_o .> 1e-6)
+    if any(x -> abs(x) > 1e-6, γ_o)
         Bk = basis.Bk[k]
         R_o, Nno = size(Bk)
 
@@ -113,7 +113,7 @@ end
 
 
 function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::Vector{Float64}, γ_o::Vector{Float64}, Pe::Real, β0::Union{Nothing, Real})
-    any(γ_o .> 1e-6) && _require_basis_odd_coefficients(basis)
+    any(x -> abs(x) > 1e-6, γ_o) && _require_basis_odd_coefficients(basis)
 
     nk = length(dom.K)
     work = Vector{Any}(undef, nk)
@@ -126,8 +126,8 @@ function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::V
 end
 
 
-function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::Matrix{Float64}, γ_o::Matrix{Float64}, Pe::Real, β0::Union{Nothing, Real})
-    any(γ_o .> 1e-6) && _require_basis_odd_coefficients(basis)
+function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::Matrix{ComplexF64}, γ_o::Matrix{ComplexF64}, Pe::Real, β0::Union{Nothing, Real})
+    any(x -> abs(x) > 1e-6, γ_o) && _require_basis_odd_coefficients(basis)
 
     nk = length(dom.K)
     work = Vector{Any}(undef, nk)
@@ -342,7 +342,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
     T = zeros(Float64, nt, length(dom.y), nx)
 
     x0 = dom.x[1]
-    any(γ_o .> 1e-6) && _require_basis_odd_coefficients(basis)
+    any(x -> abs(x) > 1e-6, γ_o) && _require_basis_odd_coefficients(basis)
 
     # define progressmeter instance
     p = show_progress && nt > 0 ?
@@ -392,6 +392,94 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
     end
     return T
 end
+
+
+function solve_explicit(dom::Domain, basis::SpectralBasis,
+                        T0::Matrix{Float64}, tvals;
+                        t0::Real=0.0,
+                        β0::Union{Nothing, Real}=nothing,
+                        show_progress::Bool=true,
+                        parallel::Bool=true)
+    
+    L = 2*(dom.x[2]-dom.x[1] + dom.x[end])
+    # case flow is odd
+
+    # case flow is not odd
+    fac = 1.0
+
+    # in the following, each Fourier coeff has y dependence
+    c0_2D, ce_2D, co_2D = StirMix.normal_mode_decomposition(T0, dom.x; Lx=L, dim=2)
+    Ces = hcat(c0_2D ./ 2, StirMix.complex_x_coeffs(ce_2D, co_2D))
+    χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(Ces, 2*dom.y; Lx=2π, dim=1)
+    ny = length(dom.y)
+    γ = vcat(χ_0', χ_e)
+    _dom = dom
+
+    # _dom = dom # only relevant when even extension
+    Pe = basis.Pe 
+    # identify to reuse function
+    Ccoeffs = ones(ComplexF64, length(dom.K))
+    τ = tvals
+
+    nt = length(τ)
+    nx = length(dom.x)
+    nk = length(dom.K)
+
+    T = zeros(Float64, nt, length(dom.y), nx)
+
+    x0 = dom.x[1]
+    any(x -> abs(x) > 1e-6, γ_o) && _require_basis_odd_coefficients(basis)
+
+    # define progressmeter instance
+    p = show_progress && nt > 0 ?
+        Progress(nt; desc="Computing time-evolving solution") :
+        nothing
+    
+    processed = Ref(0)
+
+    advance_progress = p === nothing ? nothing : () -> begin
+        processed[] += 1
+        update!(p, processed[])
+        return nothing
+    end
+
+    completed=false
+    old_fft_threads = nothing
+
+    try
+        if parallel && Threads.nthreads() > 1
+            old_fft_threads = FFTW.get_num_threads()
+            FFTW.set_num_threads(Threads.nthreads())
+        end
+
+        work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0)
+        spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
+        field = Matrix{Float64}(undef, ny, nx)
+        xplan = plan_irfft(spectrum, nx, 2)
+
+        for (it, t) in enumerate(τ)
+            _solve_explicit_time!(T, it, t, spectrum, field, xplan,
+                                  work, _dom, Ccoeffs, x0,
+                                  nx, ny, nk, fac;
+                                  parallel=parallel)
+            advance_progress === nothing || advance_progress()
+        end
+        completed = true
+    finally
+        old_fft_threads === nothing || FFTW.set_num_threads(old_fft_threads)
+
+        if p !== nothing
+            if completed
+                finish!(p)
+            else
+                cancel(p, "Time evolution aborted")
+            end
+        end
+    end
+    return T
+end
+
+
 
 function _avg_work_scratch(work)
     return [AvgModeWork(w.A0, w.λ, w.γproj, similar(w.e)) for w in work]
