@@ -466,6 +466,20 @@ end
         @test !occursin("aborted", lowercase(progress_avg_output))
     end
 
+    @testset "solve_explicit tvals type compatibility" begin
+        ccoeffs = ones(ComplexF64, length(dom.K))
+        basis = spectral_basis(:cos, Pe, dom, 10; precision_policy=:float64, show_progress=false)
+
+        reference = solve_explicit(dom, basis, fy_even, ccoeffs, [0.1, 0.2, 0.3]; show_progress=false)
+
+        for tvals in [0.1:0.1:0.3, ProgressTestTimes([0.1, 0.2, 0.3])]
+            @test solve_explicit(dom, basis, fy_even, ccoeffs, tvals; show_progress=false) ≈ reference
+        end
+
+        scalar_ref = solve_explicit(dom, basis, fy_even, ccoeffs, [0.1]; show_progress=false)
+        @test solve_explicit(dom, basis, fy_even, ccoeffs, 0.1; show_progress=false) ≈ scalar_ref
+    end
+
     @testset "time resampling ranges" begin
         nft, vals, ivals = StirMix.time_resample([0.0, 0.24, 0.26, 0.74, 0.76, 1.0];
                                                  nt=1)

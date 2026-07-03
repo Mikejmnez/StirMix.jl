@@ -126,6 +126,20 @@ function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::V
 end
 
 
+function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::Matrix{Float64}, γ_o::Matrix{Float64}, Pe::Real, β0::Union{Nothing, Real})
+    any(γ_o .> 1e-6) && _require_basis_odd_coefficients(basis)
+
+    nk = length(dom.K)
+    work = Vector{Any}(undef, nk)
+
+    for k in 1:nk
+        work[k] = _prepare_coefficient_mode_work_point(dom, basis, γ[:, k], γ_o[:, k], Pe, k, β0)
+    end
+
+    return work
+end
+
+
 function _time_chunks(nt::Integer, nchunks::Integer)
     chunks = Vector{UnitRange{Int}}(undef, nchunks)
     for i in 1:nchunks
@@ -279,7 +293,12 @@ function _solve_explicit_time!(T, it, t, spectrum, field, xplan, work,
 end
 
 
-function solve_explicit(dom, basis, fy, Ccoeffs, tvals;
+_collect_tvals(tvals::Vector{Float64}) = tvals
+_collect_tvals(tvals::Real) = [Float64(tvals)]
+_collect_tvals(tvals) = collect(Float64, tvals)
+
+function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
+                        Ccoeffs::Vector{ComplexF64}, tvals;
                         t0::Real=0.0,
                         β0::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true,
@@ -308,8 +327,10 @@ function solve_explicit(dom, basis, fy, Ccoeffs, tvals;
     γ_o = γ_o[1:Nγ]
 
     if t0 > 0.0
-        idx = Int(round((t0 - first(tvals)) / step(tvals))) + 1
-        τ = τ[idx:end]
+        τvals = _collect_tvals(tvals)
+        dt = τvals[2] - τvals[1]
+        idx = Int(round((t0 - first(τvals)) / dt)) + 1
+        τ = τvals[idx:end]
     else
         τ = tvals
     end
