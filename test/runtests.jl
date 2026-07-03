@@ -525,6 +525,43 @@ end
         @test isapprox(real(β_1), real(β_2); atol=1e-2, rtol=1e-2)
     end
 
+    @testset "2D normal mode decomposition along a dimension" begin
+        Nx = 100
+        Ny = 150
+        L = 10
+        M=1
+        dom = domain(L, M, Nx, Ny)
+        g = @. dom.y
+        f = @. cos(2π * dom.x) - sin(3π * dom.x)
+        Z = (f * g')'
+
+        c0_2D, ce_2D, co_2D = StirMix.normal_mode_decomposition(Z, dom.x; Lx=L, dim=2)
+        c0, ce, co = StirMix.normal_mode_decomposition(f, dom.x; Lx=L)
+
+        diff = abs.(c0.* g - c0_2D)
+        @test maximum(diff) < 1e-10
+
+        for j in 1:length(ce)
+            diff = abs.(ce[j].* g - ce_2D[:, j])
+            @test maximum(diff) < 1e-10
+        end
+
+        for j in 1:length(co)
+            diff = abs.(co[j].* g - co_2D[:, j])
+            @test maximum(diff) < 1e-10
+        end
+
+        Ces = hcat(c0_2D, StirMix.complex_x_coeffs(ce_2D, co_2D))
+        C = vcat(c0, StirMix.complex_x_coeffs(ce, co))
+        χ0, χe, χo = StirMix.normal_mode_decomposition(Ces, 2 .* dom.y; Lx=2π, dim=1)
+        γ0, γe, γo = StirMix.normal_mode_decomposition(g, 2 .* dom.y; Lx=2π)
+
+        @test eltype(χ0) <: Complex
+        @test χ0 ≈ γ0 .* C
+        @test χe ≈ γe * transpose(C)
+        @test χo ≈ γo * transpose(C)
+    end
+
     @testset "odd flow decomposition Even periodic extension" begin
         Nx = 8
         Ny = 200
