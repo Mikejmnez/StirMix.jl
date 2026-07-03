@@ -1,37 +1,106 @@
 
 """
-    normal_mode_decomposition(y, x; Lx, kmax=nothing)
+    normal_mode_decomposition(y, x; Lx, kmax=nothing, dim=1)
 
-y = f.(x) sampled on a uniform, periodic, half-open grid of length Lx.
-Returns (a0, a, b) for cosine/sine Fourier series.
+`y` sampled on a uniform, periodic, half-open grid `x` of length `Lx`.
+Returns `(a0, a, b)` for cosine/sine Fourier series along `dim`.
 
 - "true_amplitude": uses 2/N scaling
 - "true_phase": corrects for x not starting at 0 (e.g. x₁ = -Lx/2)
+
+For vectors, `a0` is a scalar and `a`, `b` are vectors. For higher-rank
+arrays, `a0` is the zero-mode slice with `dim` removed, while `a` and `b`
+keep the input rank with the Fourier modes stored along `dim`.
 """
-function normal_mode_decomposition(y::AbstractVector, x::AbstractVector; Lx::Real, kmax=nothing)
-    N = length(y)
+function normal_mode_decomposition(
+    y::AbstractVector,
+    x::AbstractVector;
+    Lx::Real,
+    kmax=nothing,
+    dim::Integer=1,
+)
+    dim == 1 || throw(ArgumentError("dim must be 1 for vector inputs; got dim=$dim"))
+    a0, a, b = _normal_mode_decomposition(y, x; Lx=Lx, kmax=kmax, dim=dim)
+    return a0[], a, b
+end
+
+function normal_mode_decomposition(
+    y::AbstractArray,
+    x::AbstractVector;
+    Lx::Real,
+    kmax=nothing,
+    dim::Integer=1,
+)
+    return _normal_mode_decomposition(y, x; Lx=Lx, kmax=kmax, dim=dim)
+end
+
+function _normal_mode_decomposition(
+    y::AbstractArray,
+    x::AbstractVector;
+    Lx::Real,
+    kmax=nothing,
+    dim::Integer,
+)
+    1 <= dim <= ndims(y) ||
+        throw(ArgumentError("dim must be between 1 and $(ndims(y)); got dim=$dim"))
+
+    N = size(y, dim)
     @assert length(x) == N
+    @assert N >= 2 "x must contain at least two points"
     dx = x[2] - x[1]
     @assert all(abs((x[i+1]-x[i]) - dx) < 1e-10 for i in 1:N-1) "x must be uniform"
-
-    # FFT on nonnegative frequencies
-    Y = rfft(y)
 
     # phase correction because FFT assumes samples at x = 0:dx:(N-1)dx
     x0 = x[1]
     ω0 = 2π / Lx
-    for k in 0:length(Y)-1
-        Y[k+1] *= exp(1im * (k*ω0) * x0)
+
+    if eltype(y) <: Real
+        # FFT on nonnegative frequencies
+        Y = rfft(y, dim)
+        nfreq = size(Y, dim)
+        phase = reshape(
+            [exp(-1im * (k * ω0) * x0) for k in 0:nfreq-1],
+            ntuple(d -> d == dim ? nfreq : 1, ndims(Y)),
+        )
+        Y .*= phase
+
+        # series coefficient scaling
+        a0 = 2 .* real.(selectdim(Y, dim, 1)) ./ N
+        a  = 2 .* real.(selectdim(Y, dim, 2:nfreq)) ./ N
+        b  = -2 .* imag.(selectdim(Y, dim, 2:nfreq)) ./ N
+    else
+        # Complex-valued data need both +k and -k modes.
+        Y = fft(y, dim)
+        nfreq = N ÷ 2 + 1
+
+        Cpos = copy(selectdim(Y, dim, 1:nfreq))
+        phase_pos = reshape(
+            [exp(-1im * (k * ω0) * x0) for k in 0:nfreq-1],
+            ntuple(d -> d == dim ? nfreq : 1, ndims(Y)),
+        )
+        Cpos .*= phase_pos ./ N
+
+        a0 = 2 .* selectdim(Cpos, dim, 1)
+
+        neg_indices = [N - k + 1 for k in 1:nfreq-1]
+        Cneg = copy(selectdim(Y, dim, neg_indices))
+        phase_neg = reshape(
+            [exp(1im * (k * ω0) * x0) for k in 1:nfreq-1],
+            ntuple(d -> d == dim ? nfreq - 1 : 1, ndims(Y)),
+        )
+        Cneg .*= phase_neg ./ N
+
+        Cpos_modes = selectdim(Cpos, dim, 2:nfreq)
+        a = Cpos_modes .+ Cneg
+        b = 1im .* (Cpos_modes .- Cneg)
     end
 
-    # series coefficient scaling
-    a0 = 2 * real(Y[1]) / N
-    a  = 2 .* real.(Y[2:end]) ./ N
-    b  = -2 .* imag.(Y[2:end]) ./ N
-
     if kmax !== nothing
-        a = a[1:min(kmax, length(a))]
-        b = b[1:min(kmax, length(b))]
+        kmax isa Integer || throw(ArgumentError("kmax must be an integer or nothing"))
+        kmax >= 0 || throw(ArgumentError("kmax must be nonnegative"))
+        nk = min(kmax, size(a, dim))
+        a = copy(selectdim(a, dim, 1:nk))
+        b = copy(selectdim(b, dim, 1:nk))
     end
     return a0, a, b
 end
@@ -53,6 +122,140 @@ function complex_x_coeffs(ce::AbstractVector, co::AbstractVector)
     return complex.(ce, .-co)
 end
 
+"""
+    complex_x_coeffs(ce, co)
+
+Convert cosine/sine Fourier coefficients in x into complex coefficients C
+such that
+
+    real(C[k] * exp(im* 2πK[k]*x)) = ce[k]*cos((2πK[k]*x) + co[k]*sin((2πK[k]*x)
+
+Hence:
+    C[k] = ce[k] - im*co[k]
+"""
+function complex_x_coeffs(ce::AbstractMatrix, co::AbstractMatrix)
+    @assert size(ce) == size(co) "ce and co must have the same shape"
+    return complex.(ce, .-co)
+end
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Internal helper
+# ──────────────────────────────────────────────────────────────────────────────
+
+"""Advance and wrap phi_old to [0, 2π]."""
+function _update_phi_old(phi_old::Real, phi_new::Real)
+    phi_old = phi_old + phi_new
+    if phi_old > 2π
+        phi_old -= 2π
+    elseif phi_old < 0
+        phi_old += 2π
+    end
+    return phi_old
+end
+
+"""
+    coeff_project(phi, y; phi_old=π, phi_new=0.0)
+
+Compute the even and odd Fourier coefficients of the 1-D signal `phi(y)` after
+applying a phase shift `phi_new`.
+
+# Arguments
+- `phi`    : 1-D (complex) vector, `phi = phi(y)`
+- `y`      : 1-D real vector of y in `[0, 2π]` coordinates (uniform spacing)
+- `phi_old`: original centering of the flow (default π)
+- `phi_new`: phase shift of the velocity field (default 0)
+
+# Returns
+- `even_coeffs`: complex vector of length `nL+1` — cosine coefficients `a_l`,
+                 `l = 0, 1, …, nL`
+- `odd_coeffs` : complex vector of length `nL`   — sine  coefficients `b_l`,
+                 `l = 1, 2, …, nL`
+- `phi_new`    : unchanged
+- `phi_old`    : updated phase reference, wrapped to `[0, 2π]`
+
+# Reconstruction
+```
+phi_shifted(y) ≈ Σ_{l=0}^{nL}  even_coeffs[l+1] * cos(l*y)
+               + Σ_{l=1}^{nL}  odd_coeffs[l]    * sin(l*y)
+```
+"""
+function coeff_project(
+    phi::AbstractVector,
+    y::AbstractVector;
+    phi_old::Real = π,
+    phi_new::Real = 0.0,
+)
+    phi_old = _update_phi_old(phi_old, phi_new)
+    L    = length(y)
+    nL   = (L - 1) ÷ 2
+
+    χc_0, χc, γc_o = normal_mode_decomposition(phi, y; Lx=2π)
+
+
+    phi_cos = [cos(-l * phi_new) for l in 1:nL]
+    phi_sin = [sin(-l * phi_new) for l in 1:nL]
+
+    e_coeffs = χc .* phi_cos .- γc_o .* phi_sin
+    e_coeffs = vcat(χc_0, e_coeffs)  # prepend γc_0
+
+    o_coeffs = γc_o .* phi_cos .+ χc .* phi_sin
+
+    return e_coeffs, o_coeffs, phi_new, phi_old
+end
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 2-D method  (y along dimension 1, x along dimension 2)
+# ──────────────────────────────────────────────────────────────────────────────
+
+"""
+    coeff_project(phi, y; phi_old=π, phi_new=0.0)
+
+2-D overload: `phi` has shape `(Ly, Lx)` with the **y-dimension along dim 1**.
+The FFT is applied along dim 1 only; the x-dimension is carried through.
+
+# Returns
+- `even_coeffs`: complex matrix of shape `(nL+1, Lx)` — row index is wavenumber `l`
+- `odd_coeffs` : complex matrix of shape `(nL,   Lx)` — row index is wavenumber `l`
+- `phi_new`, `phi_old`: same semantics as the 1-D method
+
+# Reconstruction (at a fixed x-column `j`)
+```
+phi_shifted(y) ≈ Σ_{l=0}^{nL}  even_coeffs[l+1, j] * cos(l*y)
+               + Σ_{l=1}^{nL}  odd_coeffs[l,   j] * sin(l*y)
+```
+"""
+function coeff_project(
+    phi::AbstractMatrix,
+    y::AbstractVector;
+    phi_old::Real = π,
+    phi_new::Real = 0.0,
+)
+    phi_old = _update_phi_old(phi_old, phi_new)
+
+    L    = length(y)
+    nL   = (L - 1) ÷ 2
+    norm = (y[end] - y[1]) / (2 * (y[2] - y[1]))
+
+    # FFT along dim 1 (the y-axis).  F[k+1, :] ↔ wavenumber k.
+    F = fft(phi, 1)
+
+    F_pos     = F[1:nL+1, :]
+    F_neg_rev = [F[1:1, :]; F[L:-1:L-nL+1, :]]   # (nL+1, Lx)
+
+    e_coeffs = 0.5 .* (F_pos .+ F_neg_rev) ./ norm
+    e_coeffs[1, :] ./= 2
+    o_coeffs = 0.5 .* (F_pos .- F_neg_rev) ./ (-1im * norm)
+
+    # Column vector (nL+1, 1) so it broadcasts against (nL+1, Lx)
+    phi_cos = reshape([cos(-l * phi_new) for l in 0:nL], :, 1)
+    phi_sin = reshape([sin(-l * phi_new) for l in 0:nL], :, 1)
+
+    da_even = e_coeffs .* phi_cos .- o_coeffs .* phi_sin   # (nL+1, Lx)
+    da_odd  = o_coeffs .* phi_cos .+ e_coeffs .* phi_sin   # (nL+1, Lx)
+
+    return da_even, da_odd[2:end, :], phi_new, phi_old
+end
 
 """
     cosine_tail_data(y, γ, Nn)

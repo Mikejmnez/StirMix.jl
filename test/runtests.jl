@@ -466,6 +466,20 @@ end
         @test !occursin("aborted", lowercase(progress_avg_output))
     end
 
+    @testset "solve_explicit tvals type compatibility" begin
+        ccoeffs = ones(ComplexF64, length(dom.K))
+        basis = spectral_basis(:cos, Pe, dom, 10; precision_policy=:float64, show_progress=false)
+
+        reference = solve_explicit(dom, basis, fy_even, ccoeffs, [0.1, 0.2, 0.3]; show_progress=false)
+
+        for tvals in [0.1:0.1:0.3, ProgressTestTimes([0.1, 0.2, 0.3])]
+            @test solve_explicit(dom, basis, fy_even, ccoeffs, tvals; show_progress=false) ≈ reference
+        end
+
+        scalar_ref = solve_explicit(dom, basis, fy_even, ccoeffs, [0.1]; show_progress=false)
+        @test solve_explicit(dom, basis, fy_even, ccoeffs, 0.1; show_progress=false) ≈ scalar_ref
+    end
+
     @testset "time resampling ranges" begin
         nft, vals, ivals = StirMix.time_resample([0.0, 0.24, 0.26, 0.74, 0.76, 1.0];
                                                  nt=1)
@@ -523,6 +537,43 @@ end
         # must finish test here
         @test isapprox(real(β0_1), real(β0_2); atol=1e-2, rtol=1e-2)
         @test isapprox(real(β_1), real(β_2); atol=1e-2, rtol=1e-2)
+    end
+
+    @testset "2D normal mode decomposition along a dimension" begin
+        Nx = 100
+        Ny = 150
+        L = 10
+        M=1
+        dom = domain(L, M, Nx, Ny)
+        g = @. dom.y
+        f = @. cos(2π * dom.x) - sin(3π * dom.x)
+        Z = (f * g')'
+
+        c0_2D, ce_2D, co_2D = StirMix.normal_mode_decomposition(Z, dom.x; Lx=L, dim=2)
+        c0, ce, co = StirMix.normal_mode_decomposition(f, dom.x; Lx=L)
+
+        diff = abs.(c0.* g - c0_2D)
+        @test maximum(diff) < 1e-10
+
+        for j in 1:length(ce)
+            diff = abs.(ce[j].* g - ce_2D[:, j])
+            @test maximum(diff) < 1e-10
+        end
+
+        for j in 1:length(co)
+            diff = abs.(co[j].* g - co_2D[:, j])
+            @test maximum(diff) < 1e-10
+        end
+
+        Ces = hcat(c0_2D, StirMix.complex_x_coeffs(ce_2D, co_2D))
+        C = vcat(c0, StirMix.complex_x_coeffs(ce, co))
+        χ0, χe, χo = StirMix.normal_mode_decomposition(Ces, 2 .* dom.y; Lx=2π, dim=1)
+        γ0, γe, γo = StirMix.normal_mode_decomposition(g, 2 .* dom.y; Lx=2π)
+
+        @test eltype(χ0) <: Complex
+        @test χ0 ≈ γ0 .* C
+        @test χe ≈ γe * transpose(C)
+        @test χo ≈ γo * transpose(C)
     end
 
     @testset "odd flow decomposition Even periodic extension" begin
@@ -674,6 +725,91 @@ end
         # test that values are indeed equal in the intervals
         @assert all(i -> nft[ind[i][1]] === nft[ind[i][2]], range(1,length(ind)))
 
+    end
+
+
+    @testset "y function 1D projection: Case1 " begin
+        dom = domain(1, 1, 8, 501)
+        Ld1 = 1.0 / 8.0
+        @testset "Case 1: phi_new=π/2 phi_old=π" begin
+            phi_new = 0.5*π
+            phi_old = π
+            Phi     = exp.(-0.5 .* (2dom.y .- phi_old).^2 ./ (0.5 * Ld1^2))
+            expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)).^2 ./ (0.5 * Ld1^2))
+            even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(Phi, dom.y; phi_new = phi_new, phi_old = phi_old)
+            reconstructed = StirMix.reconstruct_fourier_series(collect(2*dom.y), even_c[1], even_c[2:end], odd_c; Lx=2*π)
+            @test isapprox(reconstructed, expected; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_new, phi_old - phi_new; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_old, phi_old + phi_new; atol=1e-4, rtol=1e-4)
+        end
+        @testset "Case 2: phi_new=π/4 phi_old=π/2" begin
+            phi_new = 0.25*π
+            phi_old = 0.5*π
+            Phi     = exp.(-0.5 .* (2dom.y .- phi_old).^2 ./ (0.5 * Ld1^2))
+            expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)).^2 ./ (0.5 * Ld1^2))
+            even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(Phi, dom.y; phi_new = phi_new, phi_old = phi_old)
+            reconstructed = StirMix.reconstruct_fourier_series(collect(2*dom.y), even_c[1], even_c[2:end], odd_c; Lx=2*π)
+            @test isapprox(reconstructed, expected; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_new, phi_old - phi_new; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_old, phi_old + phi_new; atol=1e-4, rtol=1e-4)
+        end
+
+        @testset "Case 3: phi_new=π phi_old=π" begin
+            phi_new = π
+            phi_old = π
+            Phi     = exp.(-0.5 .* (2dom.y .- phi_old).^2 ./ (0.5 * Ld1^2))
+            expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)).^2 ./ (0.5 * Ld1^2)) + exp.(-0.5 .* (2dom.y .- 2π).^2 ./ (0.5 * Ld1^2))
+
+            even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(Phi, dom.y; phi_new = phi_new)
+            reconstructed = StirMix.reconstruct_fourier_series(collect(2*dom.y), even_c[1], even_c[2:end], odd_c; Lx=2*π)
+            @test isapprox(reconstructed, expected; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_new, π; atol=1e-4, rtol=1e-4)
+            @test isapprox(nphi_old, 2*π; atol=1e-4, rtol=1e-4)
+        end
+    end
+
+    @testset "2D IVP" begin
+        Pe = 1
+        Nx = 1000
+        Ny = 150
+        M  = 1
+        L  = 100
+        dom = domain(L, M, Nx, Ny)
+        tvals = [0.0, 0.1]
+        basis = spectral_basis(:cos, Pe, dom, 100; compute_odd=true, show_progress=false)
+        @testset "Case 1: separable gaussian stripe IVP" begin
+            # Initial condition in cross-stream direction
+            σ2_y0 = 1000
+            g = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2))
+            σ2_x = 10
+            X0 =0 
+            f = @. exp(-((dom.x-X0)/sqrt(2*σ2_x)).^2)
+            # get 2D initial condition from separable components
+            Z = g * transpose(f)
+
+            T = solve_explicit(dom, basis, Z, tvals; β0=0)
+            @test size(T) == (length(tvals), length(dom.y), length(dom.x))
+            @test isapprox(T[1, :, :], Z; atol=1e-3, rtol=1e-3)
+        end
+        @testset "Case 2: non-separable IVP" begin
+            σ2_y0 = 1/5
+            g = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2))
+            σ2_x = 50
+            X0 =0 
+            f = @. exp(-((dom.x-X0)/sqrt(2*σ2_x)).^2)
+            # get 2D initial condition from separable components
+            Z = g * transpose(f)
+            f1 = @. cos(pi* dom.x /(L/2)) - sin(pi* dom.x /(L/4))
+            f2 = @. sin(pi* dom.x /(L/2)) + cos(pi* dom.x /(L/4))
+            g1 = @. cos(2pi* dom.y)
+            g2 = @. sin(2pi* dom.y)
+            Z1 = g1 * f1'
+            Z2 = g2 * f2'
+            Zn = Z .* (Z1 + Z2)
+            T = solve_explicit(dom, basis, Zn, tvals; β0=0)
+            @test size(T) == (length(tvals), length(dom.y), length(dom.x))
+            @test isapprox(T[1, :, :], Zn; atol=1e-4, rtol=1e-1)
+        end
     end
 
 end
