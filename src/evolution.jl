@@ -479,6 +479,36 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
 end
 
 
+function solve_explicit(dom::Domain, bases::AbstractVector{<:SpectralBasis},
+                        T0::Matrix{Float64}, Ut::Vector{Float64}, tvals;
+                        nt::Integer=1,
+                        show_progress::Bool=true)
+
+    # discretize time evolution
+    _, _, ivals = StirMix.time_resample(Ut; nt=nt)
+    ind = StirMix.indt_intervals(ivals)
+    τ = tvals
+    nx = length(dom.x)
+    T = zeros(Float64, length(tvals), length(dom.y), length(dom.x))
+
+    p = show_progress && !isempty(ind) ?
+        Progress(length(ind); desc="Computing time-evolving solution") :
+        nothing
+    t0 = 0.0
+    for it in eachindex(ind)
+        tau = range(start=τ[ind[it][1]],step=step(τ), stop=τ[ind[it][2]]) .- t0
+        Tn = solve_explicit(dom, bases[ivals[ind[it][1]]], T0, tau; show_progress=false, parallel=true)
+        T[ind[it][1]:ind[it][2], :, :] = Tn
+        T0 = Tn[end, :, :]
+        t0 = τ[ind[it][2]]
+        p === nothing || next!(p)
+    end
+
+    p === nothing || finish!(p)
+    return T
+end
+
+
 
 function _avg_work_scratch(work)
     return [AvgModeWork(w.A0, w.λ, w.γproj, similar(w.e)) for w in work]

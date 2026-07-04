@@ -767,7 +767,6 @@ end
             @test isapprox(nphi_old, 2*π; atol=1e-4, rtol=1e-4)
         end
     end
-
     @testset "2D IVP" begin
         Pe = 1
         Nx = 1000
@@ -812,4 +811,27 @@ end
         end
     end
 
+    @testset "2D IVP with time dependence" begin
+        Pe = 500
+        Nx = 1000
+        Ny = 150
+        M  = 1
+        L  = 100 # how much bigger is the x-domain than cross-stream
+        dom = domain(L, M, Nx, Ny)
+        σ2_y0 = 1000
+        g = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2))
+        σ2_x = 10
+        X0 = -20
+        f = @. exp(-((dom.x-X0)/sqrt(2*σ2_x)).^2)
+        Z = g * transpose(f)
+        
+        tvals = range(0, 0.25, length=100)
+        ft = 0.5 .+ 0.5*cos.(20π .* tvals)
+        Pe_vals = [Pe; Pe; Pe]
+        bases = [spectral_basis(:cos, Pe, dom, 100; show_progress=false) for Pe in Pe_vals]
+        T_iter = solve_explicit(dom, bases, Z, ft, tvals; show_progress=false)
+        T_cont = solve_explicit(dom, bases[1], Z, tvals; show_progress=false)
+        diff = abs.(T_iter[end, :, :] - T_cont[end, :, :])
+        @test isapprox(diff, zero(diff); atol=1e-4, rtol=1e-1)
+    end
 end
