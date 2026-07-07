@@ -827,7 +827,7 @@ end
         
         tvals = range(0, 0.25, length=100)
         ft = 0.5 .+ 0.5*cos.(20π .* tvals)
-        Pe_vals = [Pe; Pe; Pe]
+        Pe_vals = [Pe; Pe; Pe; Pe; Pe]
         bases = [spectral_basis(:cos, Pe, dom, 100; show_progress=false) for Pe in Pe_vals]
         T_iter = solve_explicit(dom, bases, Z, ft, tvals; show_progress=false)
         T_cont = solve_explicit(dom, bases[1], Z, tvals; show_progress=false)

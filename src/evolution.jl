@@ -32,7 +32,11 @@ function _sine_y_basis(y::AbstractVector, R::Integer)
 end
 
 function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
-    Ak = basis.Ak[k]
+
+    conj_spectrum = Pe < 0
+
+    Ak0 = basis.Ak[k]
+    Ak = conj_spectrum ? conj.(Ak0) : Ak0
 
     R, Nn = size(Ak)
     Kk = 2π * dom.K[k]
@@ -41,7 +45,10 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
     else
         βshift = im * (Float64(β0) / 2) * Kk * Float64(Pe)
     end
+
     λ = ComplexF64.(basis.an[k])
+    conj_spectrum && conj!(λ)
+    
     @. λ =  λ / 4 + Kk^2 + βshift
 
     Nuse = min(R, length(γ))
@@ -172,15 +179,19 @@ end
 
 
 function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe)
-    nk = length(dom.K)
 
+    conj_spectrum = Pe < 0
+    nk = length(dom.K)
     work = Vector{AvgModeWork}(undef, nk)
 
     βshift = im * (β0 / 2) * Pe
 
     for k in 1:nk
-        Akk = Ak[k]
+        Ak0 = Ak[k]
+        Akk = conj_spectrum ? conj.(Ak0) : Ak0
+
         ank = avals[k]
+        conj_spectrum && conj!(ank)
 
         Nn = length(ank)
         Kk = 2π * dom.K[k]
@@ -482,6 +493,7 @@ end
 function solve_explicit(dom::Domain, bases::AbstractVector{<:SpectralBasis},
                         T0::Matrix{Float64}, Ut::Vector{Float64}, tvals;
                         nt::Integer=1,
+                        β0::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true)
 
     # discretize time evolution
@@ -497,7 +509,7 @@ function solve_explicit(dom::Domain, bases::AbstractVector{<:SpectralBasis},
     t0 = 0.0
     for it in eachindex(ind)
         tau = range(start=τ[ind[it][1]],step=step(τ), stop=τ[ind[it][2]]) .- t0
-        Tn = solve_explicit(dom, bases[ivals[ind[it][1]]], T0, tau; show_progress=false, parallel=true)
+        Tn = solve_explicit(dom, bases[ivals[ind[it][1]]], T0, tau; show_progress=false, parallel=true, β0=β0)
         T[ind[it][1]:ind[it][2], :, :] = Tn
         T0 = Tn[end, :, :]
         t0 = τ[ind[it][2]]
