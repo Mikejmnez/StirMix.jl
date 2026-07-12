@@ -527,6 +527,9 @@ end
         @test_throws ArgumentError solve_explicit(dom, basis_coeff, fy_odd,
                                                   ccoeffs, tvals;
                                                   show_progress=false)
+
+
+        @test size(field_coeff) == size(field_coeff)
     end
     @testset "flow decomposition comparison: predetermined vs prescribed" begin
         Nx=8
@@ -834,4 +837,38 @@ end
         diff = abs.(T_iter[end, :, :] - T_cont[end, :, :])
         @test isapprox(diff, zero(diff); atol=1e-4, rtol=1e-1)
     end
+
+    @testset "2D IVP with time dependence but soln is y-averaged" begin
+        Pe = 100
+        dom = domain(200, 1, 2500, 250)
+
+        σ2_y0 = 1/10
+        g_c = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2));
+
+        tvals = range(0, 0.2, length=10)
+        ft = sin.(5π .* tvals);
+        nft, _, _ = StirMix.time_resample(ft; nt=0);
+
+        # create list of identical basis
+        Pe_vals = [Pe; Pe; Pe]
+        bases = [spectral_basis(:cos, Pe, dom, 100; show_progress=false) for Pe in Pe_vals];
+
+        # single mode in x
+        ik=2
+        Cmodes = zero(dom.K);
+        Cmodes[ik] = 1
+
+        T_c = evolve_explicit_avg(dom, bases[1], g_c, Cmodes, tvals;show_progress=false)
+        T_iter = evolve_explicit_avg(dom, bases, g_c, Cmodes, ft, tvals; nt=0,show_progress=false)
+
+        ik=4
+        Cmodes = zero(dom.K)
+        Cmodes[ik] = 1
+        T_c = evolve_explicit_avg(dom, bases[1], g_c, Cmodes, tvals; show_progress=false)
+        T_iter = evolve_explicit_avg(dom, bases, g_c, Cmodes, ft, tvals; nt=0, show_progress=false)
+
+        diff = T_c .- T_iter
+        @test isapprox(diff, zero(diff); atol=1e-10, rtol=1e-1)
+    end
+
 end

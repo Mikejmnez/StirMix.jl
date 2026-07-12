@@ -119,7 +119,7 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
 end
 
 
-function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::Vector{Float64}, γ_o::Vector{Float64}, Pe::Real, β0::Union{Nothing, Real})
+function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::Vector{<:Number}, γ_o::Vector{<:Number}, Pe::Real, β0::Union{Nothing, Real})
     any(x -> abs(x) > 1e-6, γ_o) && _require_basis_odd_coefficients(basis)
 
     nk = length(dom.K)
@@ -145,6 +145,29 @@ function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::M
 
     return work
 end
+
+
+function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::Vector{<:Number}, γ_o::Vector{<:Number}, Pe::Real, β0::Union{Nothing, Real}, ik::Integer)
+    any(x -> abs(x) > 1e-6, γ_o) && _require_basis_odd_coefficients(basis)
+
+    nk = length(dom.K)
+    work = Vector{Any}(undef, nk)
+    work[ik] = _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, ik, β0)
+
+    return work
+end
+
+
+function _prepare_coefficient_mode_work(dom::Domain, basis::SpectralBasis, γ::Matrix{ComplexF64}, γ_o::Matrix{ComplexF64}, Pe::Real, β0::Union{Nothing, Real}, ik::Integer)
+    any(x -> abs(x) > 1e-6, γ_o) && _require_basis_odd_coefficients(basis)
+
+    nk = length(dom.K)
+    work = Vector{Any}(undef, nk)
+    work[ik] = _prepare_coefficient_mode_work_point(dom, basis, γ[:, ik], γ_o[:, ik], Pe, ik, β0)
+
+    return work
+end
+
 
 
 function _time_chunks(nt::Integer, nchunks::Integer)
@@ -178,7 +201,7 @@ function _fetch_all_tasks(tasks)
 end
 
 
-function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe)
+function prepare_mode_data_avg(dom::Domain, Ak::Vector{Any}, avals::Vector{Any}, γ::Vector{Float64}, β0::Union{Nothing, Real}, Pe::Real)
 
     conj_spectrum = Pe < 0
     nk = length(dom.K)
@@ -218,6 +241,49 @@ function prepare_mode_data_avg(dom, Ak, avals, γ, β0, Pe)
 end
 
 
+
+function prepare_mode_data_avg(dom::Domain, Ak::Vector{Any}, avals::Vector{Any}, γ::Matrix{ComplexF64}, β0::Union{Nothing, Real}, Pe::Real)
+
+    conj_spectrum = Pe < 0
+    nk = length(dom.K)
+    work = Vector{AvgModeWork}(undef, nk)
+
+    βshift = im * (β0 / 2) * Pe
+
+    for k in 1:nk
+        Ak0 = Ak[k]
+        Akk = conj_spectrum ? conj.(Ak0) : Ak0
+
+        ank = avals[k]
+        conj_spectrum && conj!(ank)
+
+        Nn = length(ank)
+        Kk = 2π * dom.K[k]
+        Tmode = promote_type(eltype(Akk), eltype(ank), eltype(γ),
+                             typeof(βshift * Kk), typeof(Kk^2))
+
+        A0 = Vector{Tmode}(undef, Nn)
+        γproj = Vector{Tmode}(undef, Nn)
+        e = Vector{Tmode}(undef, Nn)
+        λ = Vector{Tmode}(undef, Nn)
+
+        Nγ = min(size(γ, 1), size(Akk, 1))
+
+        copyto!(A0, vec(Akk[1, :]))
+
+        mul!(γproj, transpose(view(Akk, 1:Nγ, :)), view(γ, 1:Nγ, k))
+        
+        @. λ = ank / 4 + Kk^2 + βshift * Kk
+
+        work[k] = AvgModeWork(A0, λ, γproj, e)
+    end
+
+    return work
+end
+
+
+
+
 function _add_tail!(f, tail, t, Kk, fac)
     m_tail, Atail, γtail, tmp = tail
     isempty(m_tail) && return nothing
@@ -232,7 +298,8 @@ function _add_tail!(f, tail, t, Kk, fac)
 end
 
 
-function _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0, nx, ny, fac, t64, k)
+function _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0, nx, ny, fac, t64, k;
+                                spectrum_star=nothing)
     wk = work[k]
     Kk = 2π * dom.K[k]
 
@@ -275,26 +342,60 @@ function _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0, nx, ny, fac, t6
         end
     end
 
+    if spectrum_star !== nothing
+        col_star = @view spectrum_star[:, k]
+        if _irfft_self_conjugate_mode(k, nx)
+            if wk.projection_o !== nothing
+                @inbounds @simd for iy in 1:ny
+                    col_star[iy] = real(ComplexF64(wk.f[iy] + wk.f_o[iy]))
+                end
+            else
+                @inbounds @simd for iy in 1:ny
+                    col_star[iy] = real(ComplexF64(wk.f[iy]))
+                end
+            end
+        else
+            if wk.projection_o !== nothing
+                @inbounds @simd for iy in 1:ny
+                    col_star[iy] = ComplexF64(wk.f[iy] + wk.f_o[iy])
+                end
+            else
+                @inbounds @simd for iy in 1:ny
+                    col_star[iy] = ComplexF64(wk.f[iy])
+                end
+            end
+        end
+    end
+
     return nothing
 end
 
 
 function _solve_explicit_time!(T, it, t, spectrum, field, xplan, work,
                                             dom, Ccoeffs, x0, nx, ny, nk, fac;
-                                            parallel::Bool=false)
+                                            parallel::Bool=false,
+                                            modal_k::Union{Nothing,Int}=nothing,
+                                            spectrum_star=nothing)
     fill!(spectrum, 0)
+    spectrum_star === nothing || fill!(spectrum_star, 0)
     t64 = Float64(t)
     _ny = size(T,2)
 
-    if parallel && Threads.nthreads() > 1 && nk > 1
+    if modal_k !== nothing
+        _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0,
+                              nx, ny, fac, t64, modal_k;
+                              spectrum_star=spectrum_star)
+    elseif parallel && Threads.nthreads() > 1 && nk > 1
         Threads.@threads :dynamic for k in 1:nk
             _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0,
-                                  nx, ny, fac, t64, k)
+                                  nx, ny, fac, t64, k;
+                                  spectrum_star=spectrum_star)
         end
     else
         for k in 1:nk
             _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0,
-                                  nx, ny, fac, t64, k)
+                                  nx, ny, fac, t64, k;
+                                  spectrum_star=spectrum_star)
         end
     end
 
@@ -308,12 +409,14 @@ _collect_tvals(tvals::Vector{Float64}) = tvals
 _collect_tvals(tvals::Real) = [Float64(tvals)]
 _collect_tvals(tvals) = collect(Float64, tvals)
 
+
 function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
-                        Ccoeffs::Vector{ComplexF64}, tvals;
+                        Ccoeffs::Vector{<:Number}, tvals;
                         t0::Real=0.0,
                         β0::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true,
-                        parallel::Bool=true)
+                        parallel::Bool=true,
+                        modal::Bool=false)
 
     if basis.even_extension
         fac = 0.25
@@ -359,7 +462,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
     p = show_progress && nt > 0 ?
         Progress(nt; desc="Computing time-evolving solution") :
         nothing
-    
+
     processed = Ref(0)
 
     advance_progress = p === nothing ? nothing : () -> begin
@@ -372,12 +475,15 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
     old_fft_threads = nothing
 
     try
-        if parallel && Threads.nthreads() > 1
+        if parallel && !modal && Threads.nthreads() > 1
             old_fft_threads = FFTW.get_num_threads()
             FFTW.set_num_threads(Threads.nthreads())
         end
 
-        work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0)
+        ik = modal ? findfirst(!iszero, Ccoeffs) : nothing
+        work = ik === nothing ?
+            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0) :
+            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0, ik)
         spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
         field = Matrix{Float64}(undef, ny, nx)
         xplan = plan_irfft(spectrum, nx, 2)
@@ -386,7 +492,8 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
             _solve_explicit_time!(T, it, t, spectrum, field, xplan,
                                   work, _dom, Ccoeffs, x0,
                                   nx, ny, nk, fac;
-                                  parallel=parallel)
+                                  parallel=parallel && !modal,
+                                  modal_k=ik)
             advance_progress === nothing || advance_progress()
         end
         completed = true
@@ -405,12 +512,118 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
 end
 
 
+function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64},
+                        Ccoeffs::Vector{<:Number}, tvals;
+                        t0::Real=0.0,
+                        β0::Union{Nothing, Real}=nothing,
+                        show_progress::Bool=true,
+                        parallel::Bool=true,
+                        modal::Bool=false, 
+                        compute_Φky::Bool=false)
+
+    if basis.even_extension
+        fac = 0.25
+        nfy = vcat(fy, fy)
+        Nγ = length(nfy)÷2
+        _y = vcat(dom.y, pi .+ dom.y)
+        χ_0, χ_e, γ_o = normal_mode_decomposition(nfy, _y; Lx=2π)
+        ny = length(_y)
+        dx = dom.x[2]-dom.x[1]
+        _L = dom.x[end]-dom.x[1] + dx
+        _dom = domain(_L, 1, length(dom.x), ny)
+    else
+        fac = 1.0
+        χ_0, χ_e, γ_o = normal_mode_decomposition(fy, 2*dom.y; Lx=2π)
+        ny = length(dom.y)
+        Nγ = ny÷2
+        _dom = dom
+    end
+
+    Pe = basis.Pe 
+    γ = vcat(χ_0, χ_e)[1:Nγ]
+    γ_o = γ_o[1:Nγ]
+
+    if t0 > 0.0
+        τvals = _collect_tvals(tvals)
+        dt = τvals[2] - τvals[1]
+        idx = Int(round((t0 - first(τvals)) / dt)) + 1
+        τ = τvals[idx:end]
+    else
+        τ = tvals
+    end
+
+    nt = length(τ)
+    nx = length(dom.x)
+    nk = length(dom.K)
+
+    T = zeros(Float64, nt, length(dom.y), nx)
+
+    x0 = dom.x[1]
+    any(x -> abs(x) > 1e-6, γ_o) && _require_basis_odd_coefficients(basis)
+
+    # define progressmeter instance
+    p = show_progress && nt > 0 ?
+        Progress(nt; desc="Computing time-evolving solution") :
+        nothing
+
+    processed = Ref(0)
+
+    advance_progress = p === nothing ? nothing : () -> begin
+        processed[] += 1
+        update!(p, processed[])
+        return nothing
+    end
+
+    completed=false
+    old_fft_threads = nothing
+    spectrum_star = compute_Φky ? zeros(ComplexF64, ny, nx ÷ 2 + 1) : nothing
+
+    try
+        if parallel && !modal && Threads.nthreads() > 1
+            old_fft_threads = FFTW.get_num_threads()
+            FFTW.set_num_threads(Threads.nthreads())
+        end
+
+        ik = modal ? findfirst(!iszero, Ccoeffs) : nothing
+        work = ik === nothing ?
+            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0) :
+            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0, ik)
+        spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
+        field = Matrix{Float64}(undef, ny, nx)
+        xplan = plan_irfft(spectrum, nx, 2)
+
+        for (it, t) in enumerate(τ)
+            _solve_explicit_time!(T, it, t, spectrum, field, xplan,
+                                  work, _dom, Ccoeffs, x0,
+                                  nx, ny, nk, fac;
+                                  parallel=parallel && !modal,
+                                  modal_k=ik,
+                                  spectrum_star=spectrum_star)
+            advance_progress === nothing || advance_progress()
+        end
+        completed = true
+    finally
+        old_fft_threads === nothing || FFTW.set_num_threads(old_fft_threads)
+
+        if p !== nothing
+            if completed
+                finish!(p)
+            else
+                cancel(p, "Time evolution aborted")
+            end
+        end
+    end
+    return (T, spectrum_star)
+end
+
+
 function solve_explicit(dom::Domain, basis::SpectralBasis,
                         T0::Matrix{Float64}, tvals;
                         t0::Real=0.0,
                         β0::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true,
-                        parallel::Bool=true)
+                        parallel::Bool=true, 
+                        compute_Φky::Bool=false)
     
     L = 2*(dom.x[2]-dom.x[1] + dom.x[end])
     # case flow is odd
@@ -456,6 +669,8 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
     completed=false
     old_fft_threads = nothing
 
+    spectrum_star = compute_Φky ? zeros(ComplexF64, ny, nx ÷ 2 + 1) : nothing
+
     try
         if parallel && Threads.nthreads() > 1
             old_fft_threads = FFTW.get_num_threads()
@@ -465,13 +680,15 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
         work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0)
         spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
         field = Matrix{Float64}(undef, ny, nx)
+        # precompute the plan for the inverse transform in x
         xplan = plan_irfft(spectrum, nx, 2)
 
         for (it, t) in enumerate(τ)
             _solve_explicit_time!(T, it, t, spectrum, field, xplan,
                                   work, _dom, Ccoeffs, x0,
                                   nx, ny, nk, fac;
-                                  parallel=parallel)
+                                  parallel=parallel, 
+                                  spectrum_star=spectrum_star)
             advance_progress === nothing || advance_progress()
         end
         completed = true
@@ -486,9 +703,8 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
             end
         end
     end
-    return T
+    return compute_Φky ? (T, spectrum_star) : T
 end
-
 
 function solve_explicit(dom::Domain, bases::AbstractVector{<:SpectralBasis},
                         T0::Matrix{Float64}, Ut::Vector{Float64}, tvals;
@@ -530,6 +746,9 @@ end
 function _evolve_explicit_avg_time!(T, it, t, spec, work, dom, Ccoeffs, x0, nx, fac)
     fill!(spec, 0)
 
+    # it is missing the tail - initial condition that decay are pure normal mode
+    # soln to diffusion equation (see add_tail! function in case of non-avg soln)
+
     for k in eachindex(dom.K)
         wk = work[k]
 
@@ -557,7 +776,7 @@ function _evolve_explicit_avg_time!(T, it, t, spec, work, dom, Ccoeffs, x0, nx, 
 end
 
 
-function evolve_explicit_avg(dom, basis, fy, Ccoeffs, tvals;
+function evolve_explicit_avg(dom::Domain, basis::SpectralBasis, fy::Vector{<:Number}, Ccoeffs::Vector{<:Number}, tvals;
                              β0::Union{Nothing, Real}=nothing,
                              show_progress::Bool=true,
                              parallel::Bool=true)
@@ -658,3 +877,79 @@ function evolve_explicit_avg(dom, basis, fy, Ccoeffs, tvals;
 
     return T
 end
+
+
+function evolve_explicit_avg(dom::Domain, basis::SpectralBasis, fy::Matrix{ComplexF64}, Ccoeffs::Vector{<:Number}, tvals;
+                             parallel::Bool=true,
+                             show_progress::Bool=true,
+                             β0::Union{Nothing, Real}=nothing)
+
+    if basis.even_extension
+        fac = 0.25
+        nfy = vcat(fy, fy)
+        Nγ = size(nfy, 1) ÷ 2
+        _y = vcat(dom.y, pi .+ dom.y)
+        χ_0, χ_e, _ = normal_mode_decomposition(nfy, _y; Lx=2π, dim=1)
+    else
+        fac = 1.0
+        χ_0, χ_e, _ = normal_mode_decomposition(fy, 2*dom.y; Lx=2π, dim=1)
+        ny = length(dom.y)
+        Nγ = ny÷2
+    end
+    γ = vcat(transpose(χ_0), χ_e)[1:Nγ, :]
+
+    nt = length(tvals)
+    nx = length(dom.x)
+
+    T = zeros(Float64, nt, nx)
+    spec = zeros(ComplexF64, nx ÷ 2 + 1)
+
+    x0 = dom.x[1]
+    if β0===nothing
+        work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, basis.β0, basis.Pe)
+    else
+        work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, β0, basis.Pe)
+    end
+    for (it, t) in enumerate(tvals)
+        _evolve_explicit_avg_time!(T, it, t, spec, work, dom,
+                                    Ccoeffs, x0, nx, fac)
+    end
+
+    return T
+end
+
+
+function evolve_explicit_avg(dom::Domain, bases::AbstractVector{<:SpectralBasis},
+                        fy::Vector{Float64}, Ccoeffs::Vector{<:Number}, Ut::Vector{Float64}, tvals;
+                        nt::Integer=1,
+                        β0::Union{Nothing, Real}=nothing,
+                        show_progress::Bool=true)
+
+    # discretize time evolution
+    _, _, ivals = StirMix.time_resample(Ut; nt=nt)
+    ind = StirMix.indt_intervals(ivals)
+    τ = tvals
+    T = zeros(Float64, length(tvals), length(dom.x))
+
+    p = show_progress && !isempty(ind) ?
+        Progress(length(ind); desc="Computing time-evolving solution") :
+        nothing
+    t0 = 0.0
+    fx = reconstruct_from_complex_coeffs(dom.x, 2pi*dom.K, Ccoeffs);
+    Tp = fy * transpose(fx)
+
+    for it in eachindex(ind)
+        tau = range(start=τ[ind[it][1]],step=step(τ), stop=τ[ind[it][2]]) .- t0
+        Tn = evolve_explicit_avg(dom, bases[ivals[ind[it][1]]], fy, Ccoeffs, tau; show_progress=false, parallel=true, β0=β0)
+        T[ind[it][1]:ind[it][2], :] = Tn
+        t0 = τ[ind[it][2]]
+        # get 2d-spectrum 
+        Tp, fy = solve_explicit(dom, bases[ivals[ind[it][1]]], Tp, [tau[1], tau[end]]; show_progress=false, parallel=true, β0=β0, compute_Φky=true)
+        Tp = Tp[end, :, :]
+        p === nothing || next!(p)
+    end
+
+    p === nothing || finish!(p)
+    return T
+end
+
