@@ -95,10 +95,12 @@ Returns `(nft, vals, ivals)` where
 - `vals`  : all allowed discrete values, ordered increasingly
 - `ivals` : indices such that `vals[ivals[i]] == nft[i]`
 
+Mathematically, 
+    `vals[ivals[i]] == nft[i]`
+
 Notes:
 - `ivals` uses Julia's 1-based indexing.
-- This version uses nearest-level rounding, which reproduces the Python
-  midpoint logic efficiently.
+- This version uses nearest-level rounding
 """
 function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
     nt < 0 && throw(ArgumentError("nt must be >= 0"))
