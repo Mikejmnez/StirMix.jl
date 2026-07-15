@@ -27,3 +27,8 @@ struct AvgModeWork{T}
     γproj::Vector{T}
     e::Vector{T}
 end
+
+const BasesIter = NamedTuple{
+    (:basis, :nft, :Pes, :vals, :ivals, :indT),
+    Tuple{Vector{SpectralBasis},Vector{Float64},Vector{Float64},Vector{Float64},Vector{Int},Vector{Tuple{Int,Int}}},
+}

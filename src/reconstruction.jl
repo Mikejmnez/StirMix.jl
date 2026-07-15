@@ -89,17 +89,24 @@ with levels spaced by
 over the interval [0, 1] when `ft` is nonnegative, and over [-1, 1]
 otherwise.
 
-Returns `(nft, vals, ivals)` where
+Returns `(nft, vals, ivals, vals_pos, ivals_pos)` where
 
-- `nft`   : discretized signal
+- `nft`   : discretized signal (retains sign)
 - `vals`  : all allowed discrete values, ordered increasingly
 - `ivals` : indices such that `vals[ivals[i]] == nft[i]`
+- `vals_pos`  : the nonnegative half of `vals` (i.e. `0:Δ:1`) — the distinct
+                `|·|` magnitudes present in `nft`
+- `ivals_pos` : indices such that `vals_pos[ivals_pos[i]] == abs(nft[i])`
 
-Mathematically, 
+Mathematically,
     `vals[ivals[i]] == nft[i]`
+    `vals_pos[ivals_pos[i]] == abs(nft[i])`
+
+When `ft` is already nonnegative, `vals_pos`/`ivals_pos` alias `vals`/`ivals`
+directly (no fold needed).
 
 Notes:
-- `ivals` uses Julia's 1-based indexing.
+- `ivals` and `ivals_pos` use Julia's 1-based indexing.
 - This version uses nearest-level rounding
 """
 function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
@@ -107,9 +114,12 @@ function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
 
     T = float(eltype(ft))
     Δ = one(T) / T(2^nt)
+
+    # compute left (lo) and right (hi) endpoints
     lo = !isempty(ft) && all(x -> T(x) >= zero(T), ft) ? zero(T) : -one(T)
     hi = one(T)
 
+    # vals is monotonic, 
     vals = collect(lo:Δ:hi)
 
     nft = Vector{T}(undef, length(ft))
@@ -124,7 +134,19 @@ function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
         ivals[i] = Int(round((y - lo) / Δ)) + 1
     end
 
-    return nft, vals, ivals
+    # check if there are negative values in ft, if so folder them to 
+    # estimate positive vals and ivals indexes.
+    if lo < 0
+        # vals is symmetric about 0 (odd length), so folding an index onto
+        # the nonnegative half is a reflection about the center index.
+        center = (length(vals) + 1) ÷ 2
+        vals_pos = vals[center:end]
+        ivals_pos = [abs(iv - center) + 1 for iv in ivals]
+    else
+        vals_pos, ivals_pos = vals, ivals
+    end
+
+    return nft, vals, ivals, vals_pos, ivals_pos
 end
 
 

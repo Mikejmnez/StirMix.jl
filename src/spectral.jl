@@ -723,3 +723,17 @@ function spectral_basis(flow::Symbol, Pe, domain::Domain, Ns::Union{Nothing,Inte
 
     return basis
 end
+
+
+function compute_bases(U::Union{Symbol,AbstractVector}, dom::Domain, Pe::Real, ft::Vector{Float64}, Ns::Integer; nt::Integer=1)::BasesIter
+    nft, _, _, vals_pos, ivals_pos = StirMix.time_resample(ft; nt=nt)
+    Pe_set = Pe * vals_pos
+    bases = [spectral_basis(U, Pe, dom, Ns) for Pe in Pe_set]
+    Pe_vals = Pe * nft # truly negative values
+    indT = StirMix.indt_intervals(ivals_pos)
+
+    return (basis=bases, nft=nft, Pes=Pe_vals, vals=vals_pos, ivals=ivals_pos, indT=indT)
+
+end
+
+
