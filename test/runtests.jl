@@ -27,6 +27,28 @@ function Base.iterate(tvals::ProgressTestTimes, state=1)
     return tvals.values[state], state + 1
 end
 
+"""
+    identical_bases_iter(U, dom, Pe, ft, Ns; nt=1)
+
+Build a `BasesIter`-shaped `NamedTuple` (see `StirMix.compute_bases`) whose
+`basis` entries are all constructed from the *same* `Pe`, regardless of how
+many distinct time-resampled levels `ft` has. Unlike `compute_bases`, which
+scales `Pe` by each distinct magnitude in `ft`, this keeps every basis (and
+every entry of `Pes`) identical to a plain `spectral_basis(U, Pe, dom, Ns)`.
+
+This lets tests exercise the `BasesIter`-driven dispatch path in
+`solve_explicit`/`evolve_explicit_avg` (interval lookup via `.indT`/`.ivals`,
+basis/Pe selection via `.basis`/`.Pes`) while asserting the result is
+identical to calling the single-basis method directly with `bases.basis[1]`.
+"""
+function identical_bases_iter(U, dom, Pe::Real, ft::Vector{Float64}, Ns::Integer; nt::Integer=1)
+    nft, _, _, vals_pos, ivals_pos = StirMix.time_resample(ft; nt=nt)
+    basis = [spectral_basis(U, Pe, dom, Ns; show_progress=false) for _ in vals_pos]
+    Pes = fill(Float64(Pe), length(nft))
+    indT = StirMix.indt_intervals(ivals_pos)
+    return (basis=basis, nft=nft, Pes=Pes, vals=vals_pos, ivals=ivals_pos, indT=indT)
+end
+
 function capture_stderr(f)
     mktemp() do _, io
         result = redirect_stdout(devnull) do
@@ -830,10 +852,12 @@ end
         
         tvals = range(0, 0.25, length=100)
         ft = 0.5 .+ 0.5*cos.(20π .* tvals)
-        Pe_vals = [Pe; Pe; Pe; Pe; Pe]
-        bases = [spectral_basis(:cos, Pe, dom, 100; show_progress=false) for Pe in Pe_vals]
-        T_iter = solve_explicit(dom, bases, Z, ft, tvals; show_progress=false)
-        T_cont = solve_explicit(dom, bases[1], Z, tvals; show_progress=false)
+        # BasesIter built from identical (same-Pe) bases: exercises the
+        # interval-dispatch path in solve_explicit while the physics itself
+        # never actually changes basis, so it must match the single-basis call.
+        bases = identical_bases_iter(:cos, dom, Pe, ft, 100; nt=1)
+        T_iter = solve_explicit(dom, bases, Z, tvals; show_progress=false)
+        T_cont = solve_explicit(dom, bases.basis[1], Z, tvals; show_progress=false)
         diff = abs.(T_iter[end, :, :] - T_cont[end, :, :])
         @test isapprox(diff, zero(diff); atol=1e-4, rtol=1e-1)
     end
@@ -847,25 +871,26 @@ end
 
         tvals = range(0, 0.2, length=10)
         ft = sin.(5π .* tvals);
-        nft, _, _ = StirMix.time_resample(ft; nt=0);
 
-        # create list of identical basis
-        Pe_vals = [Pe; Pe; Pe]
-        bases = [spectral_basis(:cos, Pe, dom, 100; show_progress=false) for Pe in Pe_vals];
+        # BasesIter built from identical (same-Pe) bases: exercises the
+        # interval-dispatch path in evolve_explicit_avg while the physics
+        # itself never actually changes basis, so it must match the
+        # single-basis call.
+        bases = identical_bases_iter(:cos, dom, Pe, ft, 100; nt=0)
 
         # single mode in x
         ik=2
         Cmodes = zero(dom.K);
         Cmodes[ik] = 1
 
-        T_c = evolve_explicit_avg(dom, bases[1], g_c, Cmodes, tvals;show_progress=false)
-        T_iter = evolve_explicit_avg(dom, bases, g_c, Cmodes, ft, tvals; nt=0,show_progress=false)
+        T_c = evolve_explicit_avg(dom, bases.basis[1], g_c, Cmodes, tvals;show_progress=false)
+        T_iter = evolve_explicit_avg(dom, bases, g_c, Cmodes, tvals; show_progress=false)
 
         ik=4
         Cmodes = zero(dom.K)
         Cmodes[ik] = 1
-        T_c = evolve_explicit_avg(dom, bases[1], g_c, Cmodes, tvals; show_progress=false)
-        T_iter = evolve_explicit_avg(dom, bases, g_c, Cmodes, ft, tvals; nt=0, show_progress=false)
+        T_c = evolve_explicit_avg(dom, bases.basis[1], g_c, Cmodes, tvals; show_progress=false)
+        T_iter = evolve_explicit_avg(dom, bases, g_c, Cmodes, tvals; show_progress=false)
 
         diff = T_c .- T_iter
         @test isapprox(diff, zero(diff); atol=1e-10, rtol=1e-1)

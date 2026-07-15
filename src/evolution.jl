@@ -414,6 +414,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
                         Ccoeffs::Vector{<:Number}, tvals;
                         t0::Real=0.0,
                         β0::Union{Nothing, Real}=nothing,
+                        Pe::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true,
                         parallel::Bool=true,
                         modal::Bool=false)
@@ -436,7 +437,8 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
         _dom = dom
     end
 
-    Pe = basis.Pe 
+    _Pe = something(Pe, basis.Pe)
+
     γ = vcat(χ_0, χ_e)[1:Nγ]
     γ_o = γ_o[1:Nγ]
 
@@ -482,8 +484,8 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
 
         ik = modal ? findfirst(!iszero, Ccoeffs) : nothing
         work = ik === nothing ?
-            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0) :
-            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0, ik)
+            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, _Pe, β0) :
+            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, _Pe, β0, ik)
         spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
         field = Matrix{Float64}(undef, ny, nx)
         xplan = plan_irfft(spectrum, nx, 2)
@@ -516,6 +518,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64
                         Ccoeffs::Vector{<:Number}, tvals;
                         t0::Real=0.0,
                         β0::Union{Nothing, Real}=nothing,
+                        Pe::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true,
                         parallel::Bool=true,
                         modal::Bool=false, 
@@ -540,6 +543,8 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64
     end
 
     Pe = basis.Pe 
+    _Pe = something(Pe, basis.Pe)
+
     γ = vcat(χ_0, χ_e)[1:Nγ]
     γ_o = γ_o[1:Nγ]
 
@@ -586,8 +591,8 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64
 
         ik = modal ? findfirst(!iszero, Ccoeffs) : nothing
         work = ik === nothing ?
-            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0) :
-            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0, ik)
+            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, _Pe, β0) :
+            _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, _Pe, β0, ik)
         spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
         field = Matrix{Float64}(undef, ny, nx)
         xplan = plan_irfft(spectrum, nx, 2)
@@ -621,6 +626,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
                         T0::Matrix{Float64}, tvals;
                         t0::Real=0.0,
                         β0::Union{Nothing, Real}=nothing,
+                        Pe::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true,
                         parallel::Bool=true, 
                         compute_Φky::Bool=false)
@@ -639,7 +645,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
     γ = vcat(transpose(χ_0), χ_e)
     _dom = dom
 
-    Pe = basis.Pe 
+    _Pe = something(Pe, basis.Pe)
     # identify to reuse function
     Ccoeffs = ones(ComplexF64, length(dom.K))
     τ = tvals
@@ -677,7 +683,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
             FFTW.set_num_threads(Threads.nthreads())
         end
 
-        work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, Pe, β0)
+        work = _prepare_coefficient_mode_work(_dom, basis, γ, γ_o, _Pe, β0)
         spectrum = zeros(ComplexF64, ny, nx ÷ 2 + 1)
         field = Matrix{Float64}(undef, ny, nx)
         # precompute the plan for the inverse transform in x
@@ -706,29 +712,29 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
     return compute_Φky ? (T, spectrum_star) : T
 end
 
-function solve_explicit(dom::Domain, bases::AbstractVector{<:SpectralBasis},
-                        T0::Matrix{Float64}, Ut::Vector{Float64}, tvals;
-                        nt::Integer=1,
+function solve_explicit(dom::Domain, bases::BasesIter,
+                        T0::Matrix{Float64}, tvals;
                         β0::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true)
 
     # discretize time evolution
-    _, _, ivals = StirMix.time_resample(Ut; nt=nt)
-    ind = StirMix.indt_intervals(ivals)
+    indT = bases.indT
+    ivals = bases.ivals
+    PEs = bases.Pes
+    basis = bases.basis
     τ = tvals
-    nx = length(dom.x)
     T = zeros(Float64, length(tvals), length(dom.y), length(dom.x))
 
-    p = show_progress && !isempty(ind) ?
-        Progress(length(ind); desc="Computing time-evolving solution") :
+    p = show_progress && !isempty(indT) ?
+        Progress(length(indT); desc="Computing time-evolving solution") :
         nothing
     t0 = 0.0
-    for it in eachindex(ind)
-        tau = range(start=τ[ind[it][1]],step=step(τ), stop=τ[ind[it][2]]) .- t0
-        Tn = solve_explicit(dom, bases[ivals[ind[it][1]]], T0, tau; show_progress=false, parallel=true, β0=β0)
-        T[ind[it][1]:ind[it][2], :, :] = Tn
+    for it in eachindex(indT)
+        tau = range(start=τ[indT[it][1]],step=step(τ), stop=τ[indT[it][2]]) .- t0
+        Tn = solve_explicit(dom, basis[ivals[indT[it][1]]], T0, tau; show_progress=false, parallel=true, β0=β0, Pe=PEs[indT[it][1]])
+        T[indT[it][1]:indT[it][2], :, :] = Tn
         T0 = Tn[end, :, :]
-        t0 = τ[ind[it][2]]
+        t0 = τ[indT[it][2]]
         p === nothing || next!(p)
     end
 
@@ -778,6 +784,7 @@ end
 
 function evolve_explicit_avg(dom::Domain, basis::SpectralBasis, fy::Vector{<:Number}, Ccoeffs::Vector{<:Number}, tvals;
                              β0::Union{Nothing, Real}=nothing,
+                             Pe::Union{Nothing, Real}=nothing,
                              show_progress::Bool=true,
                              parallel::Bool=true)
 
@@ -803,11 +810,11 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis, fy::Vector{<:Num
     spec = zeros(ComplexF64, nx ÷ 2 + 1)
 
     x0 = dom.x[1]
-    if β0===nothing
-        work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, basis.β0, basis.Pe)
-    else
-        work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, β0, basis.Pe)
-    end
+
+    _Pe = something(Pe, basis.Pe)
+    _β0 = something(β0, basis.β0)
+    work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, _β0, _Pe)
+
     # define progressmeter instance
     p = show_progress && nt > 0 ?
         Progress(nt; desc="Computing time-evolving solution") :
@@ -882,7 +889,8 @@ end
 function evolve_explicit_avg(dom::Domain, basis::SpectralBasis, fy::Matrix{ComplexF64}, Ccoeffs::Vector{<:Number}, tvals;
                              parallel::Bool=true,
                              show_progress::Bool=true,
-                             β0::Union{Nothing, Real}=nothing)
+                             β0::Union{Nothing, Real}=nothing, 
+                             Pe::Union{Nothing, Real}=nothing)
 
     if basis.even_extension
         fac = 0.25
@@ -904,12 +912,13 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis, fy::Matrix{Compl
     T = zeros(Float64, nt, nx)
     spec = zeros(ComplexF64, nx ÷ 2 + 1)
 
+
     x0 = dom.x[1]
-    if β0===nothing
-        work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, basis.β0, basis.Pe)
-    else
-        work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, β0, basis.Pe)
-    end
+
+    _Pe = something(Pe, basis.Pe)
+    _β0 = something(β0, basis.β0)
+    work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, _β0, _Pe)
+
     for (it, t) in enumerate(tvals)
         _evolve_explicit_avg_time!(T, it, t, spec, work, dom,
                                     Ccoeffs, x0, nx, fac)
@@ -919,32 +928,34 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis, fy::Matrix{Compl
 end
 
 
-function evolve_explicit_avg(dom::Domain, bases::AbstractVector{<:SpectralBasis},
-                        fy::Vector{Float64}, Ccoeffs::Vector{<:Number}, Ut::Vector{Float64}, tvals;
-                        nt::Integer=1,
+function evolve_explicit_avg(dom::Domain, bases::BasesIter,
+                        fy::Vector{Float64}, Ccoeffs::Vector{<:Number},tvals;
                         β0::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true)
 
     # discretize time evolution
-    _, _, ivals = StirMix.time_resample(Ut; nt=nt)
-    ind = StirMix.indt_intervals(ivals)
+    indT = bases.indT
+    ivals = bases.ivals
+    PEs = bases.Pes
+    basis = bases.basis
+
     τ = tvals
     T = zeros(Float64, length(tvals), length(dom.x))
 
-    p = show_progress && !isempty(ind) ?
-        Progress(length(ind); desc="Computing time-evolving solution") :
+    p = show_progress && !isempty(indT) ?
+        Progress(length(indT); desc="Computing time-evolving solution") :
         nothing
     t0 = 0.0
     fx = reconstruct_from_complex_coeffs(dom.x, 2pi*dom.K, Ccoeffs);
     Tp = fy * transpose(fx)
 
-    for it in eachindex(ind)
-        tau = range(start=τ[ind[it][1]],step=step(τ), stop=τ[ind[it][2]]) .- t0
-        Tn = evolve_explicit_avg(dom, bases[ivals[ind[it][1]]], fy, Ccoeffs, tau; show_progress=false, parallel=true, β0=β0)
-        T[ind[it][1]:ind[it][2], :] = Tn
-        t0 = τ[ind[it][2]]
+    for it in eachindex(indT)
+        tau = range(start=τ[indT[it][1]],step=step(τ), stop=τ[indT[it][2]]) .- t0
+        Tn = evolve_explicit_avg(dom, basis[ivals[indT[it][1]]], fy, Ccoeffs, tau; show_progress=false, parallel=true, β0=β0, Pe=PEs[indT[it][1]])
+        T[indT[it][1]:indT[it][2], :] = Tn
+        t0 = τ[indT[it][2]]
         # get 2d-spectrum 
-        Tp, fy = solve_explicit(dom, bases[ivals[ind[it][1]]], Tp, [tau[1], tau[end]]; show_progress=false, parallel=true, β0=β0, compute_Φky=true)
+        Tp, fy = solve_explicit(dom, basis[ivals[indT[it][1]]], Tp, [tau[1], tau[end]]; show_progress=false, parallel=true, β0=β0, Pe=PEs[indT[it][1]], compute_Φky=true)
         Tp = Tp[end, :, :]
         p === nothing || next!(p)
     end
