@@ -412,7 +412,6 @@ _collect_tvals(tvals) = collect(Float64, tvals)
 
 function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
                         Ccoeffs::Vector{<:Number}, tvals;
-                        t0::Real=0.0,
                         β0::Union{Nothing, Real}=nothing,
                         Pe::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true,
@@ -442,16 +441,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
     γ = vcat(χ_0, χ_e)[1:Nγ]
     γ_o = γ_o[1:Nγ]
 
-    if t0 > 0.0
-        τvals = _collect_tvals(tvals)
-        dt = τvals[2] - τvals[1]
-        idx = Int(round((t0 - first(τvals)) / dt)) + 1
-        τ = τvals[idx:end]
-    else
-        τ = tvals
-    end
-
-    nt = length(τ)
+    nt = length(tvals)
     nx = length(dom.x)
     nk = length(dom.K)
 
@@ -490,7 +480,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
         field = Matrix{Float64}(undef, ny, nx)
         xplan = plan_irfft(spectrum, nx, 2)
 
-        for (it, t) in enumerate(τ)
+        for (it, t) in enumerate(tvals)
             _solve_explicit_time!(T, it, t, spectrum, field, xplan,
                                   work, _dom, Ccoeffs, x0,
                                   nx, ny, nk, fac;
@@ -516,7 +506,6 @@ end
 
 function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64},
                         Ccoeffs::Vector{<:Number}, tvals;
-                        t0::Real=0.0,
                         β0::Union{Nothing, Real}=nothing,
                         Pe::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true,
@@ -542,22 +531,12 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64
         _dom = dom
     end
 
-    Pe = basis.Pe 
     _Pe = something(Pe, basis.Pe)
 
     γ = vcat(χ_0, χ_e)[1:Nγ]
     γ_o = γ_o[1:Nγ]
 
-    if t0 > 0.0
-        τvals = _collect_tvals(tvals)
-        dt = τvals[2] - τvals[1]
-        idx = Int(round((t0 - first(τvals)) / dt)) + 1
-        τ = τvals[idx:end]
-    else
-        τ = tvals
-    end
-
-    nt = length(τ)
+    nt = length(tvals)
     nx = length(dom.x)
     nk = length(dom.K)
 
@@ -597,7 +576,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64
         field = Matrix{Float64}(undef, ny, nx)
         xplan = plan_irfft(spectrum, nx, 2)
 
-        for (it, t) in enumerate(τ)
+        for (it, t) in enumerate(tvals)
             _solve_explicit_time!(T, it, t, spectrum, field, xplan,
                                   work, _dom, Ccoeffs, x0,
                                   nx, ny, nk, fac;
@@ -624,7 +603,6 @@ end
 
 function solve_explicit(dom::Domain, basis::SpectralBasis,
                         T0::Matrix{Float64}, tvals;
-                        t0::Real=0.0,
                         β0::Union{Nothing, Real}=nothing,
                         Pe::Union{Nothing, Real}=nothing,
                         show_progress::Bool=true,

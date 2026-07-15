@@ -559,7 +559,7 @@ end
         dom = domain(pi, 1, Nx, Ny)
         U, β0_1, β_1, _ = StirMix.predefined_flow(:poiseuille, dom)
         β0_2, β_2, _ = StirMix.normal_mode_decomposition(U, dom.y; Lx=Ny)
-        # must finish test here
+
         @test isapprox(real(β0_1), real(β0_2); atol=1e-2, rtol=1e-2)
         @test isapprox(real(β_1), real(β_2); atol=1e-2, rtol=1e-2)
     end
@@ -629,7 +629,7 @@ end
         σ2_y0 = 1/40
         g = @. exp(-(((dom.y-pi/4)/(sqrt(2*σ2_y0))).^2))
         χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(g, 2*dom.y; Lx=2π)
-        γ_e = vcat(χ_0, χ_e);
+        γ_e = vcat(χ_0, χ_e)
         
         NMax = 10 # Tail data begins with the following normal mode
         Nnm = length(γ_e) - NMax # how many tail cosine modes there will be
@@ -663,11 +663,7 @@ end
         L  = 1
         dom = domain(L, M, Nx, Ny)
         tvals = range(0, .01, 2)
-
-        # this is optional - can overwrite the pre-computed flow average
         newβ0 = 0
-
-
         # ==================================
         # Initial condition in cross-stream direction
         # ==================================
@@ -680,6 +676,7 @@ end
         Ccoeffs = vcat(c0/2, StirMix.complex_x_coeffs(ce, co))
 
         basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress=false, compute_odd=true)
+
         # check initial condition in y direction
         T_serial = solve_explicit(dom, basis, g, Ccoeffs, tvals;
                                   show_progress=false, parallel=false)
@@ -703,9 +700,8 @@ end
         L  = 1
         dom = domain(L, M, Nx, Ny)
         tvals = range(0, .01, 2)
-        # this is optional - can overwrite the pre-computed flow average
-        newβ0 = 0
 
+        newβ0 = 0
         # ==================================
         # Initial condition in cross-stream direction
         # ==================================
@@ -867,10 +863,10 @@ end
         dom = domain(200, 1, 2500, 250)
 
         σ2_y0 = 1/10
-        g_c = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2));
+        g_c = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2))
 
         tvals = range(0, 0.2, length=10)
-        ft = sin.(5π .* tvals);
+        ft = sin.(5π .* tvals)
 
         # BasesIter built from identical (same-Pe) bases: exercises the
         # interval-dispatch path in evolve_explicit_avg while the physics
@@ -880,7 +876,7 @@ end
 
         # single mode in x
         ik=2
-        Cmodes = zero(dom.K);
+        Cmodes = zero(dom.K)
         Cmodes[ik] = 1
 
         T_c = evolve_explicit_avg(dom, bases.basis[1], g_c, Cmodes, tvals;show_progress=false)
