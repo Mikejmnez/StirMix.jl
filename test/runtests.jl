@@ -833,29 +833,36 @@ end
     end
 
     @testset "2D IVP with time dependence" begin
-        Pe = 500
+        Pe = 100
         Nx = 1000
         Ny = 150
         M  = 1
         L  = 100 # how much bigger is the x-domain than cross-stream
         dom = domain(L, M, Nx, Ny)
-        σ2_y0 = 1000
-        g = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2))
+        σ2_y0 = 1/50
+        g = @. exp(-(((dom.y-pi/2)/(sqrt(2*σ2_y0))).^2))        
         σ2_x = 10
         X0 = -20
         f = @. exp(-((dom.x-X0)/sqrt(2*σ2_x)).^2)
         Z = g * transpose(f)
         
-        tvals = range(0, 0.25, length=100)
-        ft = 0.5 .+ 0.5*cos.(20π .* tvals)
-        # BasesIter built from identical (same-Pe) bases: exercises the
-        # interval-dispatch path in solve_explicit while the physics itself
-        # never actually changes basis, so it must match the single-basis call.
+        tvals = range(0, 0.25, length=41)
+        ft = sin.(10π .* tvals)
+
         bases = identical_bases_iter(:cos, dom, Pe, ft, 100; nt=1)
+        bases_lin = identical_bases_iter(:linear, dom, Pe, ft, 100; nt=1)
+
         T_iter = solve_explicit(dom, bases, Z, tvals; show_progress=false)
         T_cont = solve_explicit(dom, bases.basis[1], Z, tvals; show_progress=false)
         diff = abs.(T_iter[end, :, :] - T_cont[end, :, :])
+
         @test isapprox(diff, zero(diff); atol=1e-4, rtol=1e-1)
+
+        T_iter = solve_explicit(dom, bases_lin, Z, tvals; show_progress=false)
+        T_cont = solve_explicit(dom, bases_lin.basis[end], Z, tvals; show_progress=false)
+        diff = abs.(T_iter[end, :, :] - T_cont[end, :, :])
+        @test isapprox(diff, zero(diff); atol=1e-3, rtol=1e-1)
+
     end
 
     @testset "2D IVP with time dependence but soln is y-averaged" begin
