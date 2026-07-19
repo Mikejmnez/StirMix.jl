@@ -5,4 +5,4 @@ dev/*
 
 
 # Claude
-.claude/plans/*.md
+.claude/*
