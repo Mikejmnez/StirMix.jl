@@ -16,9 +16,9 @@ include("flow.jl")
 include("reconstruction.jl")
 
 export domain,
-    spectral_basis,
-    solve_explicit,
-    prepare_explicit_avg,
-    evolve_explicit_avg
+       spectral_basis,
+       solve_explicit,
+       prepare_explicit_avg,
+       evolve_explicit_avg
 
 end

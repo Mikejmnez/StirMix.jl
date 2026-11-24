@@ -43,8 +43,6 @@ function reconstruct!(f, U, γ, COStail, γtail, m_tail, tmp, t, Kk)
     return f
 end
 
-
-
 """
     reconstruct_fourier_series(x, a0, a, b; Lx)
 
@@ -55,18 +53,17 @@ f(x) ≈ a0/2 + Σ_{k=1..K} [ a[k]*cos(2πk x/Lx) + b[k]*sin(2πk x/Lx) ]
 Requires length(a) == length(b).
 """
 function reconstruct_fourier_series(x::AbstractVector, a0::Real,
-                                    a::AbstractVector, b::AbstractVector; Lx::Real)
-    @assert length(a) == length(b) "a and b must have the same length"
+        a::AbstractVector, b::AbstractVector; Lx::Real)
+    @assert length(a)==length(b) "a and b must have the same length"
     K = length(a)
     ω0 = 2π / Lx
-    f = fill(a0/2, length(x))
+    f = fill(a0 / 2, length(x))
     @inbounds for k in 1:K
         wk = k * ω0
         f .+= a[k] .* cos.(wk .* x) .+ b[k] .* sin.(wk .* x)
     end
     return f
 end
-
 
 function reconstruct_from_complex_coeffs(x, K, C)
     f = zeros(Float64, length(x))
@@ -75,8 +72,6 @@ function reconstruct_from_complex_coeffs(x, K, C)
     end
     return f
 end
-
-
 
 """
     time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
@@ -109,7 +104,7 @@ Notes:
 - `ivals` and `ivals_pos` use Julia's 1-based indexing.
 - This version uses nearest-level rounding
 """
-function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
+function time_resample(ft::AbstractVector{<:Real}; nt::Integer = 0)
     nt < 0 && throw(ArgumentError("nt must be >= 0"))
 
     T = float(eltype(ft))
@@ -149,17 +144,16 @@ function time_resample(ft::AbstractVector{<:Real}; nt::Integer=0)
     return nft, vals, ivals, vals_pos, ivals_pos
 end
 
-
 """
     indt_intervals(ivals::Vector{Integer})
 """
 function indt_intervals(ivals)
-    indt = Tuple{Int,Int}[]
+    indt = Tuple{Int, Int}[]
 
     t0 = 1
 
-    for k in 1:length(ivals)-1
-        if ivals[k] != ivals[k+1]
+    for k in 1:(length(ivals) - 1)
+        if ivals[k] != ivals[k + 1]
             push!(indt, (t0, k))
             t0 = k + 1
         end

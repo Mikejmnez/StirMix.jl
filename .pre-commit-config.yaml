@@ -1,0 +1,12 @@
+# JuliaFormatter is pinned to 1.0.62 in .formatter/ (TASK-001); style comes from
+# .JuliaFormatter.toml. Upstream's julia-formatter hook is not used: it runs the
+# globally installed JuliaFormatter and cannot pin a version.
+repos:
+  - repo: local
+    hooks:
+      - id: julia-formatter
+        name: JuliaFormatter 1.0.62 (sciml)
+        language: system
+        entry: julia --project=.formatter --startup-file=no -e 'using Pkg; Pkg.instantiate(io=devnull); using JuliaFormatter; format(ARGS) || exit(1)'
+        files: \.jl$
+        pass_filenames: true

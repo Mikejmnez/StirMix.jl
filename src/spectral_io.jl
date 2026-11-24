@@ -53,27 +53,27 @@ arguments. Array-valued entries are copied so the metadata snapshot cannot
 be mutated by later changes to `domain.K` or the Fourier coefficients.
 """
 function _spectral_io_metadata(domain::Domain, Pe, Ns, β0, β;
-                               precision_policy,
-                               qc0,
-                               qc,
-                               compute_odd::Bool,
-                               even_extension::Bool)
+        precision_policy,
+        qc0,
+        qc,
+        compute_odd::Bool,
+        even_extension::Bool)
     return (;
-        Pe=Float64(Pe),
-        Ns=Ns,
-        precision_policy=String(Symbol(precision_policy)),
-        qc0=qc0,
-        qc=qc,
-        compute_odd=compute_odd,
-        even_extension=even_extension,
-        domain_L=domain.L,
-        domain_M=domain.M,
-        domain_Nx=domain.Nx,
-        domain_Ny=domain.Ny,
-        K=copy(domain.K),
-        beta0=Float64(β0),
-        beta=copy(β),
-        bigfloat_precision_bits_at_write=precision(BigFloat),
+        Pe = Float64(Pe),
+        Ns = Ns,
+        precision_policy = String(Symbol(precision_policy)),
+        qc0 = qc0,
+        qc = qc,
+        compute_odd = compute_odd,
+        even_extension = even_extension,
+        domain_L = domain.L,
+        domain_M = domain.M,
+        domain_Nx = domain.Nx,
+        domain_Ny = domain.Ny,
+        K = copy(domain.K),
+        beta0 = Float64(β0),
+        beta = copy(β),
+        bigfloat_precision_bits_at_write = precision(BigFloat)
     )
 end
 
@@ -139,8 +139,9 @@ Build the JLD2 dataset key for entry `k` in ragged entry group `name`.
 and is stored as `data/<name>/key_width` when writing. The default width of 6
 keeps reads compatible with files written before `key_width` existed.
 """
-function _spectral_entry_key(name::AbstractString, k::Integer, width::Integer=6)
-    width > 0 || throw(ArgumentError("spectral entry key width must be positive; got $width"))
+function _spectral_entry_key(name::AbstractString, k::Integer, width::Integer = 6)
+    width > 0 ||
+        throw(ArgumentError("spectral entry key width must be positive; got $width"))
     return "data/$name/$(lpad(k, width, '0'))"
 end
 
@@ -199,41 +200,42 @@ function open_metadata(filename::AbstractString)
     return jldopen(filename, "r") do f
         has_odd = Bool(_require_spectral_key(f, "data/has_odd"))
         key_widths = has_odd ?
-            (;
-                qs=_read_spectral_key_width(f, "qs"),
-                an=_read_spectral_key_width(f, "an"),
-                Ak=_read_spectral_key_width(f, "Ak"),
-                bn=_read_spectral_key_width(f, "bn"),
-                Bk=_read_spectral_key_width(f, "Bk"),
-            ) :
-            (;
-                qs=_read_spectral_key_width(f, "qs"),
-                an=_read_spectral_key_width(f, "an"),
-                Ak=_read_spectral_key_width(f, "Ak"),
-            )
+                     (;
+            qs = _read_spectral_key_width(f, "qs"),
+            an = _read_spectral_key_width(f, "an"),
+            Ak = _read_spectral_key_width(f, "Ak"),
+            bn = _read_spectral_key_width(f, "bn"),
+            Bk = _read_spectral_key_width(f, "Bk")
+        ) :
+                     (;
+            qs = _read_spectral_key_width(f, "qs"),
+            an = _read_spectral_key_width(f, "an"),
+            Ak = _read_spectral_key_width(f, "Ak")
+        )
 
         return (;
-            schema_version=Int(_require_spectral_key(f, "meta/schema_version")),
-            stirmix_version=String(_require_spectral_key(f, "meta/stirmix_version")),
-            julia_version=String(_require_spectral_key(f, "meta/julia_version")),
-            Pe=Float64(_require_spectral_key(f, "meta/Pe")),
-            Ns=_read_optional_meta(f, "Ns"),
-            precision_policy=Symbol(_require_spectral_key(f, "meta/precision_policy")),
-            qc0=_read_optional_meta(f, "qc0"),
-            qc=_read_optional_meta(f, "qc"),
-            compute_odd=Bool(_require_spectral_key(f, "meta/compute_odd")),
-            even_extension=Bool(_require_spectral_key(f, "meta/even_extension")),
-            domain_L=Float64(_require_spectral_key(f, "meta/domain_L")),
-            domain_M=Int(_require_spectral_key(f, "meta/domain_M")),
-            domain_Nx=Int(_require_spectral_key(f, "meta/domain_Nx")),
-            domain_Ny=Int(_require_spectral_key(f, "meta/domain_Ny")),
-            K=Vector{Float64}(_require_spectral_key(f, "meta/K")),
-            beta0=Float64(_require_spectral_key(f, "meta/beta0")),
-            beta=Vector{Float64}(_require_spectral_key(f, "meta/beta")),
-            bigfloat_precision_bits_at_write=Int(_require_spectral_key(f, "meta/bigfloat_precision_bits_at_write")),
-            nk=Int(_require_spectral_key(f, "data/nk")),
-            has_odd=has_odd,
-            key_widths=key_widths,
+            schema_version = Int(_require_spectral_key(f, "meta/schema_version")),
+            stirmix_version = String(_require_spectral_key(f, "meta/stirmix_version")),
+            julia_version = String(_require_spectral_key(f, "meta/julia_version")),
+            Pe = Float64(_require_spectral_key(f, "meta/Pe")),
+            Ns = _read_optional_meta(f, "Ns"),
+            precision_policy = Symbol(_require_spectral_key(f, "meta/precision_policy")),
+            qc0 = _read_optional_meta(f, "qc0"),
+            qc = _read_optional_meta(f, "qc"),
+            compute_odd = Bool(_require_spectral_key(f, "meta/compute_odd")),
+            even_extension = Bool(_require_spectral_key(f, "meta/even_extension")),
+            domain_L = Float64(_require_spectral_key(f, "meta/domain_L")),
+            domain_M = Int(_require_spectral_key(f, "meta/domain_M")),
+            domain_Nx = Int(_require_spectral_key(f, "meta/domain_Nx")),
+            domain_Ny = Int(_require_spectral_key(f, "meta/domain_Ny")),
+            K = Vector{Float64}(_require_spectral_key(f, "meta/K")),
+            beta0 = Float64(_require_spectral_key(f, "meta/beta0")),
+            beta = Vector{Float64}(_require_spectral_key(f, "meta/beta")),
+            bigfloat_precision_bits_at_write = Int(_require_spectral_key(
+                f, "meta/bigfloat_precision_bits_at_write")),
+            nk = Int(_require_spectral_key(f, "data/nk")),
+            has_odd = has_odd,
+            key_widths = key_widths
         )
     end
 end
@@ -291,9 +293,9 @@ function _write_spectral_data(path::AbstractString, basis::SpectralBasis, meta)
             end
         end
 
-        mv(tmp, path; force=true)
+        mv(tmp, path; force = true)
     catch
-        isfile(tmp) && rm(tmp; force=true)
+        isfile(tmp) && rm(tmp; force = true)
         rethrow()
     end
 

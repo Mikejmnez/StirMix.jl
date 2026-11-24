@@ -10,13 +10,13 @@ struct Domain
 end
 
 struct SpectralBasis
-    qs
+    qs::Any
     β0::Float64
     β::Vector{Float64}
-    an
-    bn
-    Ak
-    Bk
+    an::Any
+    bn::Any
+    Ak::Any
+    Bk::Any
     Pe::Float64
     even_extension::Bool
 end
@@ -30,5 +30,6 @@ end
 
 const BasesIter = NamedTuple{
     (:basis, :nft, :Pes, :vals, :ivals, :indT),
-    Tuple{Vector{SpectralBasis},Vector{Float64},Vector{Float64},Vector{Float64},Vector{Int},Vector{Tuple{Int,Int}}},
+    Tuple{Vector{SpectralBasis}, Vector{Float64}, Vector{Float64},
+        Vector{Float64}, Vector{Int}, Vector{Tuple{Int, Int}}}
 }
