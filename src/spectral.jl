@@ -379,8 +379,7 @@ coefficients β_0 and β_e.
 function flow_decomposition(U::AbstractVector, domain::Domain)
     even_extension = false
     y = domain.y
-    Ny = 2 * domain.Ny
-    β0, β, β_o = normal_mode_decomposition(U, y; Lx = Ny)
+    β0, β, β_o = normal_mode_decomposition(U, 2 .* y; Lx = 2π)
     nb = length(β_o) ÷ 2
     if any(abs.(β_o[1:nb]) .> 1e-2)
         even_extension = true
@@ -388,7 +387,7 @@ function flow_decomposition(U::AbstractVector, domain::Domain)
         U2 = -U1
         U = (β0 / 2) .+ vcat(U1, U2)
         ny = vcat(y, pi .+ y)
-        β0, β, _ = normal_mode_decomposition(U, ny; Lx = Ny)
+        β0, β, _ = normal_mode_decomposition(U, ny; Lx = 2π)
     end
     return U, β0, β, even_extension
 end
