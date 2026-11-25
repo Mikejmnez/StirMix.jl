@@ -918,9 +918,6 @@ end
     end
 
     @testset "y-averaged yields exact result when using BasesIter" begin
-        # Regression for BUG-001: after the first interval the restart fy
-        # already carries the x-coefficients, so Ccoeffs must not be applied
-        # again. Unit coefficients cannot detect this; use non-unit and complex.
         Pe = 100
         dom = domain(200, 1, 2500, 250)
         σ2_y0 = 1 / 10
