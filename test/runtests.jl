@@ -891,10 +891,7 @@ end
         tvals = range(0, 0.2, length = 10)
         ft = sin.(5π .* tvals)
 
-        # BasesIter built from identical (same-Pe) bases: exercises the
-        # interval-dispatch path in evolve_explicit_avg while the physics
-        # itself never actually changes basis, so it must match the
-        # single-basis call.
+        # identical (same-Pe) bases mimick the time-varying case
         bases = identical_bases_iter(:cos, dom, Pe, ft, 100; nt = 0)
 
         # single mode in x
@@ -937,6 +934,29 @@ end
         T_iter = evolve_explicit_avg(dom, bases, g_c, Cmodes, tvals; show_progress = false)
 
         @test maximum(abs.(T_iter .- T_c)) ≤ 1e-12
+    end
+
+    @testset "y-averaged time-varying shear flows with an even-extension flow" begin
+        Pe = 100
+        dom = domain(200, 1, 2500, 250)
+        σ2_y0 = 1 / 10
+        g_c = @. exp(-(((dom.y - pi / 2) / (sqrt(2 * σ2_y0))) .^ 2))
+        tvals = range(0, 0.2, length = 10)
+        ft = sin.(5π .* tvals)
+
+        bases = identical_bases_iter(:linear, dom, Pe, ft, 100; nt = 0)
+        @test length(bases.indT) > 1
+
+        Cmodes = zeros(ComplexF64, length(dom.K))
+        Cmodes[2] = 0.5 + 0.5im
+        Cmodes[4] = 0.3
+
+        T_c = evolve_explicit_avg(
+            dom, bases.basis[1], g_c, Cmodes, tvals; show_progress = false)
+        T_iter = evolve_explicit_avg(dom, bases, g_c, Cmodes, tvals; show_progress = false)
+
+        @test size(T_iter) == size(T_c)
+        @test maximum(abs.(T_iter .- T_c)) ≤ 1e-3
     end
 
     @testset " odd flows twice arithmetic mean" begin
