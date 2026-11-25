@@ -626,6 +626,107 @@ end
         @test isapprox(χo, γo * transpose(C); atol = 1e-12, norm = mx)
     end
 
+    @testset "even_extension and y_modes helper" begin
+        Ny = 64
+        dom = domain(10, 1, 16, Ny)
+        Δy = π / Ny
+        mx(v) = maximum(abs, v)
+
+        # even_extension: mirror layout and doubled grid
+        f = @. exp(-((dom.y - 2.4)^2) / 0.2)  # off-center fn
+        f_ext, y_ext = StirMix.even_extension(f, dom.y)
+        @test length(f_ext) == 2Ny && length(y_ext) == 2Ny
+        @test all(j -> f_ext[Ny + j] == f[Ny + 1 - j], 1:Ny) # mirror symmetry
+        @test isapprox(y_ext[1], Δy / 2; atol = 1e-14)
+        @test isapprox(y_ext[end], 2π - Δy / 2; atol = 1e-12)
+        @test isapprox(diff(y_ext), fill(Δy, 2Ny - 1); atol = 1e-12, norm = mx)
+
+        # check that extension errs when the input does not match the grid size
+        F = hcat(f, 2f)
+        F_ext, _ = StirMix.even_extension(F, dom.y)
+        @test F_ext[:, 1] == f_ext && F_ext[:, 2] == 2f_ext
+        @test_throws DimensionMismatch StirMix.even_extension(f[1:(end - 1)], dom.y)
+
+        # extend = true: on the cell-centred grid the extension is exactly even, so any
+        # profile has no odd (sine) modes
+        γ, γ_o = StirMix.y_modes(f, dom; extend = true)
+        @test length(γ) == Ny && length(γ_o) == Ny
+        @test isapprox(γ_o, zero(γ_o); atol = 1e-14, norm = mx)
+
+        # extend = true, exact coefficients: cos(y) and cos(3y) are not π-periodic,
+        # so they are only representable through the extension
+        h = @. 0.3 + cos(dom.y) + 0.2 * cos(3dom.y)
+        γh, γh_o = StirMix.y_modes(h, dom; extend = true)
+        # construct the exact coefficients by hand, zeros 
+        # every where else.
+        γh_exact = zeros(Ny)
+        γh_exact[[1, 2, 4]] = [0.6, 1.0, 0.2]
+
+        @test isapprox(γh, γh_exact; atol = 1e-12, norm = mx)
+        @test isapprox(γh_o, zero(γh_o); atol = 1e-12, norm = mx)
+
+        # extend = false: π-periodic profile in the variable 2y
+        g = @. 0.3 + cos(2dom.y) + 0.5 * sin(4dom.y)
+        γg, γg_o = StirMix.y_modes(g, dom; extend = false)
+        γg_exact = zeros(Ny ÷ 2)
+        γg_exact[[1, 2]] = [0.6, 1.0]
+        γg_o_exact = zeros(Ny ÷ 2)
+        γg_o_exact[2] = 0.5
+        @test isapprox(γg, γg_exact; atol = 1e-12, norm = mx)
+        @test isapprox(γg_o, γg_o_exact; atol = 1e-12, norm = mx)
+
+        # matrix input is decomposed column by column, in both branches
+        for extend in (true, false)
+            Γ, Γ_o = StirMix.y_modes(ComplexF64.(hcat(h, g)), dom; extend = extend)
+            γ1, γ1_o = StirMix.y_modes(h, dom; extend = extend)
+            γ2, γ2_o = StirMix.y_modes(g, dom; extend = extend)
+            @test isapprox(Γ, hcat(γ1, γ2); atol = 1e-12, norm = mx)
+            @test isapprox(Γ_o, hcat(γ1_o, γ2_o); atol = 1e-12, norm = mx)
+        end
+    end
+
+    @testset "y_modes: even extension of a Gaussian against analytic coefficients" begin
+        # A narrow Gaussian G(y; yc) = exp(-Ld² (2y - 2yc)²) (σ_y ≈ 0.09) and its mirror
+        # image about the wall y = π, at 2π - yc, both fit in the extended period
+        # [0, 2π) with negligible tails at the walls (≲ e^-64). Integrating over ℝ, the
+        # cosine coefficients of the even extension (convention a0 = 2·mean) are
+        #     a_n = (1 / (Ld √π)) exp(-(n / (4Ld))²) cos(n yc),   b_n = 0.
+        Ny = 128
+        dom = domain(10, 1, 16, Ny)
+        Ld = 4
+        mx(v) = maximum(abs, v) # norm helper.
+        # these are the exact analytic coefficients of the even extension of the Gaussian
+        gauss(y, yc) = exp(-(Ld^2) * (2y - 2yc)^2)
+        a_exact(n, yc) = (1 / (Ld * sqrt(pi))) * exp(-(n / (4Ld))^2) * cos(n * yc)
+
+        for yc in (pi / 2, 1.0)   # specify centering via yc
+            f = gauss.(dom.y, yc)
+            # the extension is the double Gaussian, peaks at yc and 2π - yc
+            f_ext, y_ext = StirMix.even_extension(f, dom.y)
+            @test isapprox(f_ext, gauss.(y_ext, yc) .+ gauss.(y_ext, 2pi - yc);
+                atol = 1e-13, norm = mx)
+            # its Fourier coefficients from y_modes against the analytic ones
+            γ, γ_o = StirMix.y_modes(f, dom; extend = true)
+            @test isapprox(γ, [a_exact(n, yc) for n in 0:(Ny - 1)]; atol = 1e-13, norm = mx)
+            @test isapprox(γ_o, zero(γ_o); atol = 1e-13, norm = mx)
+        end
+
+        # Create ics centered at 2y = y0 = π: the coefficients of cos(2my) on the channel are
+        # Ck[m] = (1 / (Ld √π)) e^{-i m y0} e^{-(m / (2Ld))²} = (-1)^m (…), real. On the
+        # doubled domain cos(2my) is mode n = 2m, so the extended coefficients are Ck
+        # interleaved with zeros, and the non-extended ones are Ck itself.
+        y0 = π
+        fy = exp.(-(Ld^2) .* (2 .* dom.y .- y0) .^ 2)
+        Ck = [(1 / (Ld * sqrt(pi))) * exp(-im * m * y0) * exp(-(m / (2Ld))^2)
+              for m in 0:(Ny ÷ 2 - 1)]
+        @test isapprox(imag.(Ck), zero(real.(Ck)); atol = 1e-14, norm = mx)
+        γ, _ = StirMix.y_modes(fy, dom; extend = true)
+        @test isapprox(γ[1:2:end], real.(Ck); atol = 1e-13, norm = mx)
+        @test isapprox(γ[2:2:end], zero(γ[2:2:end]); atol = 1e-13, norm = mx)
+        γn, _ = StirMix.y_modes(fy, dom; extend = false)
+        @test isapprox(γn, real.(Ck); atol = 1e-13, norm = mx)
+    end
+
     @testset "odd flow decomposition Even periodic extension" begin
         Nx = 8
         Ny = 200

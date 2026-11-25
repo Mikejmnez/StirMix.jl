@@ -408,28 +408,20 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
         show_progress::Bool = true,
         parallel::Bool = true,
         modal::Bool = false)
+    γ, γ_o = y_modes(fy, dom; extend = basis.even_extension)
     if basis.even_extension
         fac = 0.5
-        nfy = vcat(fy, reverse(fy))
-        Nγ = length(nfy) ÷ 2
-        _y = vcat(dom.y, pi .+ dom.y)
-        χ_0, χ_e, γ_o = normal_mode_decomposition(nfy, _y; Lx = 2π)
-        ny = length(_y)
+        ny = 2 * length(dom.y)
         dx = dom.x[2] - dom.x[1]
         _L = dom.x[end] - dom.x[1] + dx
         _dom = domain(_L, 1, length(dom.x), ny)
     else
         fac = 1.0
-        χ_0, χ_e, γ_o = normal_mode_decomposition(fy, 2 * dom.y; Lx = 2π)
         ny = length(dom.y)
-        Nγ = ny ÷ 2
         _dom = dom
     end
 
     _Pe = something(Pe, basis.Pe)
-
-    γ = vcat(χ_0, χ_e)[1:Nγ]
-    γ_o = γ_o[1:Nγ]
 
     nt = length(tvals)
     nx = length(dom.x)
@@ -501,28 +493,20 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64
         parallel::Bool = true,
         modal::Bool = false,
         compute_Φky::Bool = false)
+    γ, γ_o = y_modes(fy, dom; extend = basis.even_extension)
     if basis.even_extension
         fac = 0.5
-        nfy = vcat(fy, reverse(fy))
-        Nγ = length(nfy) ÷ 2
-        _y = vcat(dom.y, pi .+ dom.y)
-        χ_0, χ_e, γ_o = normal_mode_decomposition(nfy, _y; Lx = 2π)
-        ny = length(_y)
+        ny = 2 * length(dom.y)
         dx = dom.x[2] - dom.x[1]
         _L = dom.x[end] - dom.x[1] + dx
         _dom = domain(_L, 1, length(dom.x), ny)
     else
         fac = 1.0
-        χ_0, χ_e, γ_o = normal_mode_decomposition(fy, 2 * dom.y; Lx = 2π)
         ny = length(dom.y)
-        Nγ = ny ÷ 2
         _dom = dom
     end
 
     _Pe = something(Pe, basis.Pe)
-
-    γ = vcat(χ_0, χ_e)[1:Nγ]
-    γ_o = γ_o[1:Nγ]
 
     nt = length(tvals)
     nx = length(dom.x)
@@ -595,32 +579,22 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
         show_progress::Bool = true,
         parallel::Bool = true,
         compute_Φky::Bool = false)
-    # period of the uniform x grid; valid for any offset of x[1] (ADR-002)
+    # period of the uniform x grid; valid for any offset of x[1]
     L = dom.x[end] - dom.x[1] + (dom.x[2] - dom.x[1])
-    # case flow is odd
-
+    # x-decomposition first; the y-extension (if any) acts row-independently, so it
+    # is applied afterwards to the coefficients
+    c0_2D, ce_2D, co_2D = normal_mode_decomposition(T0, dom.x; Lx = L, dim = 2)
+    Ces = hcat(c0_2D ./ 2, complex_x_coeffs(ce_2D, co_2D))
+    γ, γ_o = y_modes(Ces, dom; extend = basis.even_extension)
     if basis.even_extension
         fac = 0.5
-        nT0 = vcat(T0, T0[end:-1:1, :])
-        Nγ = size(nT0, 1) ÷ 2
-        _y = vcat(dom.y, pi .+ dom.y)
-        c0_2D, ce_2D, co_2D = StirMix.normal_mode_decomposition(nT0, dom.x; Lx = L, dim = 2)
-        Ces = hcat(c0_2D ./ 2, StirMix.complex_x_coeffs(ce_2D, co_2D))
-        χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(Ces, _y; Lx = 2π, dim = 1)
-        ny = length(_y)
+        ny = 2 * length(dom.y)
         _dom = domain(L, 1, length(dom.x), ny)
-
     else
         fac = 1.0
         ny = length(dom.y)
-        c0_2D, ce_2D, co_2D = StirMix.normal_mode_decomposition(T0, dom.x; Lx = L, dim = 2)
-        Ces = hcat(c0_2D ./ 2, StirMix.complex_x_coeffs(ce_2D, co_2D))
-        χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(Ces, 2 * dom.y; Lx = 2π, dim = 1)
-        ny = length(dom.y)
         _dom = dom
-        Nγ = size(T0, 1) ÷ 2
     end
-    γ = vcat(transpose(χ_0), χ_e)[1:Nγ, :]
 
     # in the following, each Fourier coeff has y dependence
     _Pe = something(Pe, basis.Pe)
@@ -761,21 +735,9 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis,
         Pe::Union{Nothing, Real} = nothing,
         show_progress::Bool = true,
         parallel::Bool = true)
-    if basis.even_extension
-        fac = 0.5
-        nfy = vcat(fy, reverse(fy))
-        Nγ = length(nfy) ÷ 2
-        _y = vcat(dom.y, pi .+ dom.y)
-        χ_0, χ_e, _ = normal_mode_decomposition(nfy, _y; Lx = 2π)
-        ny = length(dom.y)
-    else
-        fac = 1.0
-        χ_0, χ_e, _ = normal_mode_decomposition(fy, 2 * dom.y; Lx = 2π)
-        ny = length(dom.y)
-        Nγ = ny ÷ 2
-    end
-
-    γ = vcat(χ_0, χ_e)[1:Nγ]
+    # the averaged path uses only the cosine (even) modes
+    γ, _ = y_modes(fy, dom; extend = basis.even_extension)
+    fac = basis.even_extension ? 0.5 : 1.0
 
     nt = length(tvals)
     nx = length(dom.x)
@@ -865,19 +827,9 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis,
         show_progress::Bool = true,
         β0::Union{Nothing, Real} = nothing,
         Pe::Union{Nothing, Real} = nothing)
-    if basis.even_extension
-        fac = 0.5
-        nfy = vcat(fy, fy[end:-1:1, :])
-        Nγ = size(nfy, 1) ÷ 2
-        _y = vcat(dom.y, pi .+ dom.y)
-        χ_0, χ_e, _ = normal_mode_decomposition(nfy, _y; Lx = 2π, dim = 1)
-    else
-        fac = 1.0
-        χ_0, χ_e, _ = normal_mode_decomposition(fy, 2 * dom.y; Lx = 2π, dim = 1)
-        ny = length(dom.y)
-        Nγ = ny ÷ 2
-    end
-    γ = vcat(transpose(χ_0), χ_e)[1:Nγ, :]
+    # the averaged path uses only the cosine (even) modes
+    γ, _ = y_modes(fy, dom; extend = basis.even_extension)
+    fac = basis.even_extension ? 0.5 : 1.0
 
     nt = length(tvals)
     nx = length(dom.x)
