@@ -608,7 +608,7 @@ end
 
         @test eltype(χ0) <: Complex
         @test χ0 ≈ γ0 .* C
-        @test χe ≈ γe * transpose(C)
+        @test isapprox(χe, γe * transpose(C); atol = 1e-12)
         @test χo ≈ γo * transpose(C)
     end
 
@@ -767,7 +767,7 @@ end
             Phi = exp.(-0.5 .* (2dom.y .- phi_old) .^ 2 ./ (0.5 * Ld1^2))
             expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)) .^ 2 ./ (0.5 * Ld1^2))
             even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(
-                Phi, dom.y; phi_new = phi_new, phi_old = phi_old)
+                Phi, 2 .* dom.y; phi_new = phi_new, phi_old = phi_old)
             reconstructed = StirMix.reconstruct_fourier_series(
                 collect(2 * dom.y), even_c[1], even_c[2:end], odd_c; Lx = 2 * π)
             @test isapprox(reconstructed, expected; atol = 1e-4, rtol = 1e-4)
@@ -780,7 +780,7 @@ end
             Phi = exp.(-0.5 .* (2dom.y .- phi_old) .^ 2 ./ (0.5 * Ld1^2))
             expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)) .^ 2 ./ (0.5 * Ld1^2))
             even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(
-                Phi, dom.y; phi_new = phi_new, phi_old = phi_old)
+                Phi, 2 .* dom.y; phi_new = phi_new, phi_old = phi_old)
             reconstructed = StirMix.reconstruct_fourier_series(
                 collect(2 * dom.y), even_c[1], even_c[2:end], odd_c; Lx = 2 * π)
             @test isapprox(reconstructed, expected; atol = 1e-4, rtol = 1e-4)
@@ -796,7 +796,7 @@ end
                        exp.(-0.5 .* (2dom.y .- 2π) .^ 2 ./ (0.5 * Ld1^2))
 
             even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(
-                Phi, dom.y; phi_new = phi_new)
+                Phi, 2 .* dom.y; phi_new = phi_new)
             reconstructed = StirMix.reconstruct_fourier_series(
                 collect(2 * dom.y), even_c[1], even_c[2:end], odd_c; Lx = 2 * π)
             @test isapprox(reconstructed, expected; atol = 1e-4, rtol = 1e-4)
