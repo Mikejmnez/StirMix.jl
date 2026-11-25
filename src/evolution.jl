@@ -926,10 +926,15 @@ function evolve_explicit_avg(dom::Domain, bases::BasesIter,
             show_progress = false, parallel = true, β0 = β0, Pe = PEs[indT[it][1]])
         T[indT[it][1]:indT[it][2], :] = Tn
         t0 = τ[indT[it][2]]
-        # get 2d-spectrum - the x-coefficients are already applied in Tp, so we don't need to apply them again
+        # get 2d-spectrum - the x-coefficients are already applied in Tp, don't apply them again
         Tp, fy = solve_explicit(
             dom, basis[ivals[indT[it][1]]], Tp, [tau[1], tau[end]]; show_progress = false,
             parallel = true, β0 = β0, Pe = PEs[indT[it][1]], compute_Φky = true)
+        # For even-extension flows the spectrum lives on the doubled y-grid.
+        # keep only the lower half.
+        if basis[ivals[indT[it][1]]].even_extension
+            fy = fy[1:length(dom.y), :]
+        end
         Tp = Tp[end, :, :]
         C = ones(ComplexF64, length(dom.K))
         p === nothing || next!(p)
