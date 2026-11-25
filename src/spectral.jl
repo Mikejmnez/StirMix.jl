@@ -512,7 +512,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
         even_extension::Bool = false)
     sweep_chunk_size = _normalize_sweep_chunk_size(sweep_chunk_size)
 
-    fac = even_extension ? 4 : 1.0
+    fac = even_extension ? 2 : 1.0
 
     nk = length(domain.K)
     qs = Vector{Union{ComplexF64, Complex{BigFloat}}}(undef, nk)
