@@ -595,7 +595,8 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
         show_progress::Bool = true,
         parallel::Bool = true,
         compute_Φky::Bool = false)
-    L = 2 * (dom.x[2] - dom.x[1] + dom.x[end])
+    # period of the uniform x grid; valid for any offset of x[1] (ADR-002)
+    L = dom.x[end] - dom.x[1] + (dom.x[2] - dom.x[1])
     # case flow is odd
 
     if basis.even_extension
