@@ -626,6 +626,9 @@ function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
     spectral_mode === :read && return _read_spectral_data(spectral_path)
 
     _, β0, β, even_extension = flow_decomposition(U, domain)
+    if even_extension
+        β0 *= 2
+    end
     data = _collect_spectral_data(domain, abs(Pe), Ns, β;
         precision_policy = precision_policy, qc0 = qc0, qc = qc,
         parallel = parallel,
@@ -684,6 +687,7 @@ function spectral_basis(
     _, β0, β, even_extension = flow_decomposition(flow, domain)
     if even_extension
         compute_odd = true
+        β0 *= 2
     end
 
     data = _collect_spectral_data(domain, abs(Pe), Ns, β;
