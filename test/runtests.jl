@@ -1071,7 +1071,29 @@ end
         T_iter = evolve_explicit_avg(dom, bases, g_c, Cmodes, tvals; show_progress = false)
 
         @test size(T_iter) == size(T_c)
-        @test maximum(abs.(T_iter .- T_c)) ≤ 1e-3
+        @test maximum(abs.(T_iter .- T_c)) ≤ 1e-12
+    end
+
+    @testset "y-averaged soln matches the y-mean of the 2-D solve" begin
+        dom = domain(200, 1, 512, 128)
+        tvals = range(0, 0.2, length = 10)
+        Cmodes = zeros(ComplexF64, length(dom.K))
+        Cmodes[2] = 0.5 + 0.5im
+        Cmodes[4] = 0.3
+        fx = StirMix.reconstruct_from_complex_coeffs(dom.x, 2π * dom.K, Cmodes)
+        for flow in (:linear, :cos)
+            basis = spectral_basis(flow, 100, dom, 60; show_progress = false,
+                compute_odd = true)
+            for y0 in (π / 2, 2.4)   # define centering via y0
+                g = @. exp(-((dom.y - y0)^2) / 0.2)
+                T_avg = evolve_explicit_avg(dom, basis, g, Cmodes, tvals;
+                    show_progress = false)
+                T_2d = solve_explicit(dom, basis, g * transpose(fx), tvals;
+                    show_progress = false)
+                y_mean = dropdims(sum(T_2d; dims = 2); dims = 2) ./ length(dom.y)
+                @test maximum(abs.(T_avg .- y_mean)) ≤ 1e-12
+            end
+        end
     end
 
     @testset " odd flows twice arithmetic mean" begin
