@@ -938,4 +938,12 @@ end
 
         @test maximum(abs.(T_iter .- T_c)) ≤ 1e-12
     end
+
+    @testset " odd flows twice arithmetic mean" begin
+        Pe = 10
+        dom = domain(1, 1, 10, 10)
+        basis_tri = spectral_basis(:triangular, Pe, dom, 10; show_progress = false)
+        basis_lin = spectral_basis(:linear, Pe, dom, 10; show_progress = false)
+        @test isapprox(2 * basis_tri.β0, basis_lin.β0; atol = 1e-10, rtol = 1e-1)
+    end
 end
