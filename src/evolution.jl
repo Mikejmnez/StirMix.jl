@@ -918,18 +918,20 @@ function evolve_explicit_avg(dom::Domain, bases::BasesIter,
     t0 = 0.0
     fx = reconstruct_from_complex_coeffs(dom.x, 2pi * dom.K, Ccoeffs)
     Tp = fy * transpose(fx)
+    C = Ccoeffs
 
     for it in eachindex(indT)
         tau = range(start = τ[indT[it][1]], step = step(τ), stop = τ[indT[it][2]]) .- t0
-        Tn = evolve_explicit_avg(dom, basis[ivals[indT[it][1]]], fy, Ccoeffs, tau;
+        Tn = evolve_explicit_avg(dom, basis[ivals[indT[it][1]]], fy, C, tau;
             show_progress = false, parallel = true, β0 = β0, Pe = PEs[indT[it][1]])
         T[indT[it][1]:indT[it][2], :] = Tn
         t0 = τ[indT[it][2]]
-        # get 2d-spectrum 
+        # get 2d-spectrum - the x-coefficients are already applied in Tp, so we don't need to apply them again
         Tp, fy = solve_explicit(
             dom, basis[ivals[indT[it][1]]], Tp, [tau[1], tau[end]]; show_progress = false,
             parallel = true, β0 = β0, Pe = PEs[indT[it][1]], compute_Φky = true)
         Tp = Tp[end, :, :]
+        C = ones(ComplexF64, length(dom.K))
         p === nothing || next!(p)
     end
 
