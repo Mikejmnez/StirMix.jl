@@ -873,12 +873,12 @@ end
         T_cont = solve_explicit(dom, bases.basis[1], Z, tvals; show_progress = false)
         diff = abs.(T_iter[end, :, :] - T_cont[end, :, :])
 
-        @test isapprox(diff, zero(diff); atol = 1e-4, rtol = 1e-1)
+        @test isapprox(diff, zero(diff); atol = 1e-4, norm = x -> maximum(abs, x))
 
         T_iter = solve_explicit(dom, bases_lin, Z, tvals; show_progress = false)
         T_cont = solve_explicit(dom, bases_lin.basis[end], Z, tvals; show_progress = false)
         diff = abs.(T_iter[end, :, :] - T_cont[end, :, :])
-        @test isapprox(diff, zero(diff); atol = 1e-3, rtol = 1e-1)
+        @test isapprox(diff, zero(diff); atol = 1e-4, norm = x -> maximum(abs, x))
     end
 
     @testset "2D IVP with time dependence but soln is y-averaged" begin
@@ -914,7 +914,7 @@ end
         T_iter = evolve_explicit_avg(dom, bases, g_c, Cmodes, tvals; show_progress = false)
 
         diff = T_c .- T_iter
-        @test isapprox(diff, zero(diff); atol = 1e-10, rtol = 1e-1)
+        @test isapprox(diff, zero(diff); atol = 1e-10, norm = x -> maximum(abs, x))
     end
 
     @testset "y-averaged yields exact result when using BasesIter" begin

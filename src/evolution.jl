@@ -409,7 +409,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
         parallel::Bool = true,
         modal::Bool = false)
     if basis.even_extension
-        fac = 0.25
+        fac = 0.5
         nfy = vcat(fy, reverse(fy))
         Nγ = length(nfy) ÷ 2
         _y = vcat(dom.y, pi .+ dom.y)
@@ -502,7 +502,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64
         modal::Bool = false,
         compute_Φky::Bool = false)
     if basis.even_extension
-        fac = 0.25
+        fac = 0.5
         nfy = vcat(fy, reverse(fy))
         Nγ = length(nfy) ÷ 2
         _y = vcat(dom.y, pi .+ dom.y)
@@ -599,7 +599,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
     # case flow is odd
 
     if basis.even_extension
-        fac = 0.25
+        fac = 0.5
         nT0 = vcat(T0, T0[end:-1:1, :])
         Nγ = size(nT0, 1) ÷ 2
         _y = vcat(dom.y, pi .+ dom.y)
@@ -761,7 +761,7 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis,
         show_progress::Bool = true,
         parallel::Bool = true)
     if basis.even_extension
-        fac = 0.25
+        fac = 0.5
         nfy = vcat(fy, reverse(fy))
         Nγ = length(nfy) ÷ 2
         _y = vcat(dom.y, pi .+ dom.y)
@@ -865,7 +865,7 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis,
         β0::Union{Nothing, Real} = nothing,
         Pe::Union{Nothing, Real} = nothing)
     if basis.even_extension
-        fac = 0.25
+        fac = 0.5
         nfy = vcat(fy, fy[end:-1:1, :])
         Nγ = size(nfy, 1) ÷ 2
         _y = vcat(dom.y, pi .+ dom.y)
