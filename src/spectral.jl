@@ -712,6 +712,72 @@ function spectral_basis(
     return basis
 end
 
+"""
+    _rotated_flow(flow, rd::RotatedDomain) -> (U′, β0, β′)
+
+The rotated flow in the solver frame of `rd`. `flow` is the **unrotated** profile
+`U(y)`: a predefined flow symbol, or values sampled on `rd.phys.y`. Its cosine
+coefficients `U = β0/2 + Σ β[m] cos(m y)` are remapped to `U′(y′) = U(L(y′ − π) + π)`,
+i.e. `β′[m·L] = (−1)^(m(L−1)) β[m]`, and `U′` is evaluated on `rd.solver.y`.
+
+Only modes with `m·L` below the Nyquist index `length(rd.solver.y) ÷ 2` are kept (a
+cosine at that index vanishes on the cell-centred grid). Throws `ArgumentError` if the
+flow needs the even periodic extension, or if `rd` cannot resolve even the
+first harmonic.
+"""
+function _rotated_flow(flow::Union{Symbol, AbstractVector}, rd::RotatedDomain)
+    L = rd.L
+    nβ = length(rd.solver.y) ÷ 2 # NYquist 
+    mmax = (nβ - 1) ÷ L
+    mmax ≥ 1 || throw(ArgumentError(
+        "rot_domain grid too coarse: length(phys.x) = $(length(rd.phys.x)) cannot resolve " *
+        "L = $L periods of the rotated flow; need length(phys.x) ÷ 2 > L"))
+    if flow isa Symbol
+        _, β0, β, ext = predefined_flow(flow, rd.phys; Nmodes = mmax)
+    else
+        length(flow) == length(rd.phys.y) || throw(DimensionMismatch(
+            "the unrotated flow must be sampled on rd.phys.y (length $(length(rd.phys.y))); " *
+            "got length $(length(flow))"))
+        _, β0, β, ext = flow_decomposition(flow, rd.phys)
+    end
+    ext && throw(ArgumentError(
+        "a rotated flow must be even about the channel center; this flow needs " *
+        "the even periodic extension"))
+
+    β′ = zeros(Float64, nβ)
+    for m in 1:min(mmax, length(β))
+        β′[m * L] = (-1)^(m * (L - 1)) * β[m]
+    end
+    y′ = rd.solver.y
+    U′ = fill(Float64(β0) / 2, length(y′))
+    for j in eachindex(β′)
+        iszero(β′[j]) || (U′ .+= β′[j] .* cos.(j .* y′))
+    end
+    return U′, Float64(β0), β′
+end
+
+"""
+    spectral_basis(flow, Pe, rd::RotatedDomain, Ns; kwargs...)
+
+Spectral basis for a shear flow rotated by 90° on `rd`. `flow` is the
+**unrotated** profile `U(y)`, a predefined flow symbol or values sampled on
+`rd.phys.y`; it is rotated by [`_rotated_flow`](@ref) and the basis is computed on
+`rd.solver` with `Pe′ = Pe·L`. The returned basis stores `Pe′`, not `Pe`.
+
+Flows that need the even periodic extension are rejected with `ArgumentError`, also
+when the basis is read from disk (`spectral_io = :read`). Keyword arguments are those
+of the `Domain` methods.
+"""
+function spectral_basis(flow::Union{Symbol, AbstractVector}, Pe, rd::RotatedDomain, Ns;
+        kwargs...)
+    U′, _, _ = _rotated_flow(flow, rd)
+    basis = spectral_basis(U′, Pe * rd.L, rd.solver, Ns; kwargs...)
+    basis.even_extension && throw(ArgumentError(
+        "a rotated flow must be even about the channel center; the basis " *
+        "needs the even periodic extension"))
+    return basis
+end
+
 function compute_bases(U::Union{Symbol, AbstractVector}, dom::Domain, Pe::Real,
         ft::Vector{Float64}, Ns::Integer; nt::Integer = 1)::BasesIter
     nft, _, _, vals_pos, ivals_pos = StirMix.time_resample(ft; nt = nt)

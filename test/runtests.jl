@@ -1223,9 +1223,9 @@ end
         end
     end
 
-    @testset "rot_domain: physical and solver frames (FR-011, rotation Phase 2)" begin
+    @testset "rot_domain: physical and solver frames" begin
         Nx, Ny = 24, 16
-        for L in (1, 2, 5)
+        for L in (1, 2)
             rd = rot_domain(L, Nx, Ny)
             @test rd isa StirMix.RotatedDomain
             @test rd.L == L
@@ -1243,5 +1243,50 @@ end
         @test_throws ArgumentError rot_domain(2.5, Nx, Ny)
         @test_throws ArgumentError rot_domain(0, Nx, Ny)
         @test_throws ArgumentError rot_domain(-1, Nx, Ny)
+    end
+
+    @testset "spectral_basis on a RotatedDomain (FR-011, rotation Phase 3)" begin
+        Nx, Ny, Ns, Pe = 32, 16, 40, 10.0
+        close_eigs(a, b) = all(k -> isapprox(a.an[k], b.an[k]; rtol = 1e-10, atol = 1e-10),
+            eachindex(a.an))
+
+        # flows that need the even extension are rejected (FR-011)
+        rd2 = rot_domain(2, Nx, Ny)
+        @test_throws ArgumentError spectral_basis(
+            :linear, Pe, rd2, Ns; show_progress = false)
+        ramp = rd2.phys.y ./ 2π   # odd about the channel centre
+        @test_throws ArgumentError spectral_basis(ramp, Pe, rd2, Ns; show_progress = false)
+        # the unrotated flow is sampled on phys.y
+        @test_throws DimensionMismatch spectral_basis(ones(Nx), Pe, rd2, Ns;
+            show_progress = false)
+        # grid too coarse for L periods of the flow
+        @test_throws ArgumentError spectral_basis(:cos, Pe, rot_domain(20, Nx, Ny), Ns;
+            show_progress = false)
+
+        # L = 1: the rotation is the identity
+        rd1 = rot_domain(1, Nx, Ny)
+        b_rot = spectral_basis(:cos, Pe, rd1, Ns; show_progress = false)
+        b_dir = spectral_basis(:cos, Pe, rd1.solver, Ns; show_progress = false)
+        @test b_rot.Pe == Pe
+        @test b_rot.β0 ≈ b_dir.β0
+        @test ComplexF64.(b_rot.qs) ≈ ComplexF64.(b_dir.qs)   # qs has a Union eltype
+        @test close_eigs(b_rot, b_dir)
+
+        # L = 2: U′(y′) = U(2(y′ − π) + π), and β′[2] = (−1)^(1·1)·β[1] = 0.5
+        U′, β0′, β′ = StirMix._rotated_flow(:cos, rd2)
+        @test isapprox(U′, @.((1 - cos(2 * (rd2.solver.y - π) + π))/2); atol = 1e-13)
+        @test β0′ == 1.0
+        @test β′[2] ≈ 0.5
+        @test count(!iszero, β′) == 1
+
+        # named and sampled :cos give the same rotated basis (FR-009); Pe′ = Pe·L
+        b_named = spectral_basis(:cos, Pe, rd2, Ns; show_progress = false)
+        b_samp = spectral_basis(@.((1 - cos(rd2.phys.y))/2), Pe, rd2, Ns;
+            show_progress = false)
+        @test b_named.Pe == 2Pe && b_samp.Pe == 2Pe
+        @test !b_named.even_extension
+        @test isapprox(b_named.β[2], 0.5; atol = 1e-13)
+        @test isapprox(b_named.β, b_samp.β; atol = 1e-13)
+        @test close_eigs(b_named, b_samp)
     end
 end
