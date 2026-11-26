@@ -5,9 +5,14 @@
 Takes physical parameters and returns flow parameters used
 for the computation of the eigenfuncions.
 
+`L` is the **aspect ratio** of the domain: its dimensional length in x divided by its
+dimensional length in y. `L = 1` is a square box. In the code's length
+unit the y period is 2π, so the x period is `Lx = 2πL / M`. The along-stream
+wavenumbers are `2π·K = n·M / L`, `n = 0, …, Nx ÷ 2`.
+
 Grids:
 - `x`: `Nx` **cell-centred** points on the periodic interval `[-Lx/2, Lx/2]`,
-  `x_i = -Lx/2 + (i - 1/2)Δx` with `Δx = Lx / Nx`, `Lx = L / M`.
+  `x_i = -Lx/2 + (i - 1/2)Δx` with `Δx = Lx / Nx`, `Lx = 2πL / M`.
 - `y`: `Ny` **cell-centred** points in the physical cross-stream coordinate on
   `[0, 2πM]`, `y_j = (j - 1/2)Δy` with `Δy = 2πM / Ny`. Neither wall (`0`, `2πM`) is
   a grid point. Only `M = 1` is supported.
@@ -17,7 +22,8 @@ Internally the spectral code works in the Hill-equation variable `ỹ = y / 2 �
 grid points are the same in both coordinates; only the label differs.
 """
 function domain(L::Real, M::Integer, Nx::Integer, Ny::Integer)
-    Lx = L / M
+    # L is the aspect ratio; with the y period 2π, the x period is 2πL (ADR-004)
+    Lx = 2π * L / M
     ω0 = 1 / Lx
     K = ω0 .* (0:(Nx ÷ 2))
     Δx = Lx / Nx
