@@ -1407,7 +1407,7 @@ end
         b = spectral_basis(:cos, Pe, dom, Ns; show_progress = false, compute_odd = true)
         b_rot = spectral_basis(:cos, Pe, rd, Ns; show_progress = false,
             compute_odd = true)
-        # off-centre blob, so both flows advect it and odd modes are present
+
         f0 = @. cos(2 * dom.x)
         g0 = ones(Float64, length(dom.y))
         # uniform in y, single mode in x.
@@ -1456,5 +1456,107 @@ end
             show_progress = false)
         @test_throws ArgumentError renewing_flows(rd, b, b_rot, T0, tv;
             show_progress = false, compute_Φky = true)
+    end
+
+    @testset "flow shift" begin
+        Pe, Ns, N = 10.0, 40, 16
+        maxdiff(A, B) = maximum(abs.(A .- B))
+        rd = rot_domain(1, N, N)
+        dom = rd.phys
+        Δy = 2π / N
+        tv = [0.02, 0.05]
+        solve(d, bb, F, τ; kw...) = solve_explicit(d, bb, F, τ; show_progress = false,
+            kw...)
+
+        # helper: nearest whole number of grid steps
+        @test StirMix._shift_steps(0.0, dom.y) == (0, 0.0)
+        @test StirMix._shift_steps(2π, dom.y)[1] == 0
+        @test StirMix._shift_steps(π / 2, dom.y)[1] == 4
+        @test StirMix._shift_steps(π / 2 + 0.4Δy, dom.y)[1] == 4
+        @test StirMix._shift_steps(π / 2 + 0.6Δy, dom.y)[1] == 5
+        @test StirMix._shift_steps(π / 2 + 0.6Δy, dom.y)[2] ≈ 5Δy
+        @test_throws ArgumentError StirMix._shift_steps(-0.1, dom.y)
+        @test_throws ArgumentError StirMix._shift_steps(2π + 0.1, dom.y)
+
+        b = spectral_basis(:cos, Pe, dom, Ns; show_progress = false, compute_odd = true)
+        T0 = [exp(-((yy - 2.5)^2 + (xx - 0.7)^2) / 0.5) for yy in dom.y, xx in dom.x]
+
+        # zero shift is unchanged; 2π is a zero shift
+        T_ref = solve(dom, b, T0, tv)
+        @test solve(dom, b, T0, tv; shift = 0.0) == T_ref
+        @test solve(dom, b, T0, tv; shift = 2π) == T_ref
+
+        # snapping: shifts within half a grid step give the same result
+        @test solve(dom, b, T0, tv; shift = π / 2) ==
+              solve(dom, b, T0, tv; shift = π / 2 + 0.3Δy)
+
+        # exact against a directly built basis: (1 − cos y)/2 shifted by π is
+        # (1 + cos y)/2, which is even about the channel centre
+        b_π = spectral_basis((1 .+ cos.(dom.y)) ./ 2, Pe, dom, Ns;
+            show_progress = false, compute_odd = true)
+        @test maxdiff(solve(dom, b, T0, tv; shift = π), solve(dom, b_π, T0, tv)) ≤ 1e-12
+
+        # spectrum_star is shifted back with the field
+        Tπ, Φπ = solve(dom, b, T0, tv; shift = π, compute_Φky = true)
+        Td, Φd = solve(dom, b_π, T0, tv; compute_Φky = true)
+        @test maxdiff(Φπ, Φd) ≤ 1e-12
+
+        # a non-even shift: with shift π/2 the flow (1 − sin y)/2 is fastest at
+        # y = 3π/2, so a blob there travels farther in x than without the shift
+        blob = [exp(-((yy - 3π / 2)^2 + xx^2) / 0.3) for yy in dom.y, xx in dom.x]
+        xcentroid(F) = sum(F .* transpose(dom.x)) / sum(F)
+        t1 = [0.03]
+        dx0 = xcentroid(solve(dom, b, blob, t1)[1, :, :]) - xcentroid(blob)
+        dxs = xcentroid(solve(dom, b, blob, t1; shift = π / 2)[1, :, :]) -
+              xcentroid(blob)
+        @test dx0 > 0
+        @test dxs > 1.5dx0
+
+        # rotated method: shift π along x against a rotated basis built from
+        # (1 + cos y)/2
+        b_rot = spectral_basis(:cos, Pe, rd, Ns; show_progress = false,
+            compute_odd = true)
+        b_rotπ = spectral_basis((1 .+ cos.(dom.y)) ./ 2, Pe, rd, Ns;
+            show_progress = false, compute_odd = true)
+        @test maxdiff(solve(rd, b_rot, T0, tv; shift = π), solve(rd, b_rotπ, T0, tv)) ≤
+              1e-12
+        @test solve(rd, b_rot, T0, tv; shift = 0.0) == solve(rd, b_rot, T0, tv)
+
+        # renewing_flows: zero shifts are unchanged; given shifts equal hand chaining
+        n = 2
+        tvr = range(0.02; step = 0.02, length = 4n)
+        T_none = StirMix.renewing_flows(rd, b, b_rot, T0, tvr, n; show_progress = false)
+        @test StirMix.renewing_flows(rd, b, b_rot, T0, tvr, n; shifts = zeros(4),
+            show_progress = false) == T_none
+        shifts = [π / 2, π / 3, 1.0, 5.0]
+        T = StirMix.renewing_flows(rd, b, b_rot, T0, tvr, n; shifts = shifts,
+            show_progress = false)
+        F = T0
+        t_r = 0.0
+        for (j, d, bb) in ((1, dom, b), (2, rd, b_rot), (3, dom, b), (4, rd, b_rot))
+            idx = ((j - 1) * n + 1):(j * n)
+            Tn = solve(d, bb, F, tvr[idx] .- t_r; shift = shifts[j])
+            @test T[idx, :, :] == Tn
+            F = Tn[end, :, :]
+            t_r = tvr[last(idx)]
+        end
+
+        # guards
+        @test_throws ArgumentError solve(dom, b, T0, tv; shift = -0.1)
+        @test_throws ArgumentError solve(dom, b, T0, tv; shift = 2π + 0.1)
+        @test_throws ArgumentError solve(rd, b_rot, T0, tv; shift = 2π + 0.1)
+        rd2 = rot_domain(2, 2N, N)
+        b_rot2 = spectral_basis(:cos, Pe, rd2, Ns; show_progress = false,
+            compute_odd = true)
+        T02 = zeros(length(rd2.phys.y), length(rd2.phys.x))
+        @test_throws ArgumentError solve(rd2, b_rot2, T02, tv; shift = 2π + 0.1)
+        b_ext = spectral_basis(sin.(dom.y), Pe, dom, Ns; show_progress = false)
+        @test b_ext.even_extension
+        @test_throws ArgumentError solve(dom, b_ext, T0, tv; shift = π)
+        @test size(solve(dom, b_ext, T0, tv; shift = 0.0)) == (2, N, N)
+        @test_throws DimensionMismatch StirMix.renewing_flows(rd, b, b_rot, T0, tvr, n;
+            shifts = zeros(3), show_progress = false)
+        @test_throws ArgumentError StirMix.renewing_flows(rd, b, b_rot, T0, tvr, n;
+            shift = 1.0, show_progress = false)
     end
 end
