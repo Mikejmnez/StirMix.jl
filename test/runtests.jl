@@ -1399,4 +1399,62 @@ end
         @test_throws DimensionMismatch solve_explicit(rd, b2, Matrix(transpose(T0)), tv;
             show_progress = false)
     end
+
+    @testset "renewing_flows" begin
+        Pe, Ns, N = 10.0, 40, 16
+        rd = rot_domain(1, N, N)
+        dom = rd.phys
+        b = spectral_basis(:cos, Pe, dom, Ns; show_progress = false, compute_odd = true)
+        b_rot = spectral_basis(:cos, Pe, rd, Ns; show_progress = false,
+            compute_odd = true)
+        # off-centre blob, so both flows advect it and odd modes are present
+        f0 = @. cos(2 * dom.x)
+        g0 = ones(Float64, length(dom.y))
+        # uniform in y, single mode in x.
+        T0 = g0 * transpose(f0)
+        solve(d, bb, F, τ) = solve_explicit(d, bb, F, τ; show_progress = false)
+
+        # one segment: identical to the non-rotated solve
+        tv = range(0.05; step = 0.05, length = 5)
+        @test renewing_flows(rd, b, b_rot, T0, tv, 5; show_progress = false) ==
+              solve(dom, b, T0, tv)
+
+        # four full segments of n steps, chained by hand:
+        # non-rotated, rotated, non-rotated, rotated
+        n = 3
+        tv = range(0.05; step = 0.05, length = 4n)
+        # T is size (4n, N, N)
+        T = renewing_flows(rd, b, b_rot, T0, tv, n; show_progress = false)
+
+        F = T0
+        t_r = 0.0
+        for (j, d, bb) in ((1, dom, b), (2, rd, b_rot), (3, dom, b), (4, rd, b_rot))
+            idx = ((j - 1) * n + 1):(j * n)
+            Tn = solve(d, bb, F, tv[idx] .- t_r)
+            @test T[idx, :, :] == Tn
+            F = Tn[end, :, :]
+            t_r = tv[last(idx)]
+        end
+
+        # ragged last segment: 7 steps with n = 3 -> segments 3, 3, 1
+        tv = range(0.05; step = 0.05, length = 7)
+        T = renewing_flows(rd, b, b_rot, T0, tv, n; show_progress = false)
+        @test T[7, :, :] == solve(dom, b, T[6, :, :], tv[7:7] .- tv[6])[1, :, :]
+
+        # guards
+        rd2 = rot_domain(2, 2N, N)
+        @test_throws ArgumentError renewing_flows(rd2, b, b_rot,
+            zeros(length(rd2.phys.y), length(rd2.phys.x)), tv; show_progress = false)
+        @test_throws DimensionMismatch renewing_flows(
+            rd, b, b_rot, zeros(N, N + 1), tv;
+            show_progress = false)
+        @test_throws ArgumentError renewing_flows(rd, b, b_rot, T0, tv, 0;
+            show_progress = false)
+        b_even = StirMix.SpectralBasis(b_rot.qs, b_rot.β0, b_rot.β, b_rot.an, b_rot.bn,
+            b_rot.Ak, b_rot.Bk, b_rot.Pe, true)
+        @test_throws ArgumentError renewing_flows(rd, b, b_even, T0, tv;
+            show_progress = false)
+        @test_throws ArgumentError renewing_flows(rd, b, b_rot, T0, tv;
+            show_progress = false, compute_Φky = true)
+    end
 end
