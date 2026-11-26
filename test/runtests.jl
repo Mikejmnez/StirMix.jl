@@ -67,8 +67,8 @@ end
 
 @testset "StirMix.jl" begin
     dom = domain(pi, 1, 8, 50)
-    fy_odd = @. sin.(2dom.y)
-    fy_even = @. cos.(2dom.y)
+    fy_odd = @. sin.(dom.y)
+    fy_even = @. cos.(dom.y)
     Pe = 1.0
     Pe_large = 1000.0
 
@@ -564,12 +564,29 @@ end
 
         @test size(field_coeff) == size(field_coeff)
     end
+
+    @testset "domain y grid: physical coordinate (TASK-004)" begin
+        # dom.y is the physical cross-stream coordinate: Ny cell-centred points on
+        # (0, 2π) (ADR-001). The internals use ỹ = dom.y / 2, which is bit for bit the
+        # grid used before dom.y moved to the physical coordinate.
+        for Ny in (16, 125, 128)
+            dom = domain(10, 1, 8, Ny)
+            Δy = 2π / Ny
+            @test length(dom.y) == Ny
+            @test dom.y[1] == Δy / 2
+            @test isapprox(dom.y[end], 2π - Δy / 2; atol = 1e-13)
+            @test 0 < minimum(dom.y) && maximum(dom.y) < 2π
+            @test maximum(abs, diff(dom.y) .- Δy) ≤ 1e-13
+            @test StirMix._ytilde(dom) == ((1:Ny) .- 0.5) .* (π / Ny)   # exact
+        end
+    end
+
     @testset "flow decomposition comparison: predetermined vs prescribed" begin
         Nx = 8
         Ny = 100
         dom = domain(pi, 1, Nx, Ny)
         U, β0_1, β_1, _ = StirMix.predefined_flow(:poiseuille, dom)
-        β0_2, β_2, _ = StirMix.normal_mode_decomposition(U, dom.y; Lx = Ny)
+        β0_2, β_2, _ = StirMix.normal_mode_decomposition(U, dom.y; Lx = 2π)  # physical y, period 2π
 
         @test isapprox(real(β0_1), real(β0_2); atol = 1e-2, rtol = 1e-2)
         @test isapprox(real(β_1), real(β_2); atol = 1e-2, rtol = 1e-2)
@@ -585,14 +602,14 @@ end
         # Trig polynomials with known, nonzero coefficients in every family, so the
         # decomposition is checked against exact values: a phase/offset error (e.g. a
         # wrong Lx on the cell-centred grid, ADR-001) cannot cancel out.
-        # g, in the variable 2y (period 2π): a0 = 0.6, a1 = 1, b2 = 0.5
-        g = @. 0.3 + cos(2dom.y) + 0.5 * sin(4dom.y)
+        # g, in the physical y (period 2π): a0 = 0.6, a1 = 1, b2 = 0.5
+        g = @. 0.3 + cos(dom.y) + 0.5 * sin(2dom.y)
         # f, period L = 10: cos(2πx) is mode 10 (a10 = 1), sin(3πx) is mode 15 (b15 = -1)
         f = @. cos(2π * dom.x) - sin(3π * dom.x)
         Z = (f * g')'
 
         # 1-D decompositions against the exact coefficients
-        γ0, γe, γo = StirMix.normal_mode_decomposition(g, 2 .* dom.y; Lx = 2π)
+        γ0, γe, γo = StirMix.normal_mode_decomposition(g, dom.y; Lx = 2π)
         c0, ce, co = StirMix.normal_mode_decomposition(f, dom.x; Lx = L)
         γe_exact = zeros(length(γe))
         γe_exact[1] = 1.0
@@ -618,7 +635,7 @@ end
         # separability: x then y on the 2-D array equals the product of the 1-D ones
         Ces = hcat(c0_2D, StirMix.complex_x_coeffs(ce_2D, co_2D))
         C = vcat(c0, StirMix.complex_x_coeffs(ce, co))
-        χ0, χe, χo = StirMix.normal_mode_decomposition(Ces, 2 .* dom.y; Lx = 2π, dim = 1)
+        χ0, χe, χo = StirMix.normal_mode_decomposition(Ces, dom.y; Lx = 2π, dim = 1)
 
         @test eltype(χ0) <: Complex
         @test isapprox(χ0, γ0 .* C; atol = 1e-12, norm = mx)
@@ -629,12 +646,13 @@ end
     @testset "even_extension and y_modes helper" begin
         Ny = 64
         dom = domain(10, 1, 16, Ny)
+        ỹ = StirMix._ytilde(dom)  # these helpers work in the Hill variable ỹ = y / 2
         Δy = π / Ny
         mx(v) = maximum(abs, v)
 
         # even_extension: mirror layout and doubled grid
-        f = @. exp(-((dom.y - 2.4)^2) / 0.2)  # off-center fn
-        f_ext, y_ext = StirMix.even_extension(f, dom.y)
+        f = @. exp(-((ỹ - 2.4)^2) / 0.2)  # off-center fn
+        f_ext, y_ext = StirMix.even_extension(f, ỹ)
         @test length(f_ext) == 2Ny && length(y_ext) == 2Ny
         @test all(j -> f_ext[Ny + j] == f[Ny + 1 - j], 1:Ny) # mirror symmetry
         @test isapprox(y_ext[1], Δy / 2; atol = 1e-14)
@@ -643,9 +661,9 @@ end
 
         # check that extension errs when the input does not match the grid size
         F = hcat(f, 2f)
-        F_ext, _ = StirMix.even_extension(F, dom.y)
+        F_ext, _ = StirMix.even_extension(F, ỹ)
         @test F_ext[:, 1] == f_ext && F_ext[:, 2] == 2f_ext
-        @test_throws DimensionMismatch StirMix.even_extension(f[1:(end - 1)], dom.y)
+        @test_throws DimensionMismatch StirMix.even_extension(f[1:(end - 1)], ỹ)
 
         # extend = true: on the cell-centred grid the extension is exactly even, so any
         # profile has no odd (sine) modes
@@ -655,7 +673,7 @@ end
 
         # extend = true, exact coefficients: cos(y) and cos(3y) are not π-periodic,
         # so they are only representable through the extension
-        h = @. 0.3 + cos(dom.y) + 0.2 * cos(3dom.y)
+        h = @. 0.3 + cos(ỹ) + 0.2 * cos(3ỹ)
         γh, γh_o = StirMix.y_modes(h, dom; extend = true)
         # construct the exact coefficients by hand, zeros 
         # every where else.
@@ -666,7 +684,7 @@ end
         @test isapprox(γh_o, zero(γh_o); atol = 1e-12, norm = mx)
 
         # extend = false: π-periodic profile in the variable 2y
-        g = @. 0.3 + cos(2dom.y) + 0.5 * sin(4dom.y)
+        g = @. 0.3 + cos(2ỹ) + 0.5 * sin(4ỹ)
         γg, γg_o = StirMix.y_modes(g, dom; extend = false)
         γg_exact = zeros(Ny ÷ 2)
         γg_exact[[1, 2]] = [0.6, 1.0]
@@ -693,6 +711,7 @@ end
         #     a_n = (1 / (Ld √π)) exp(-(n / (4Ld))²) cos(n yc),   b_n = 0.
         Ny = 128
         dom = domain(10, 1, 16, Ny)
+        ỹ = StirMix._ytilde(dom)  # helpers work in the Hill variable ỹ = y / 2
         Ld = 4
         mx(v) = maximum(abs, v) # norm helper.
         # these are the exact analytic coefficients of the even extension of the Gaussian
@@ -700,9 +719,9 @@ end
         a_exact(n, yc) = (1 / (Ld * sqrt(pi))) * exp(-(n / (4Ld))^2) * cos(n * yc)
 
         for yc in (pi / 2, 1.0)   # specify centering via yc
-            f = gauss.(dom.y, yc)
+            f = gauss.(ỹ, yc)
             # the extension is the double Gaussian, peaks at yc and 2π - yc
-            f_ext, y_ext = StirMix.even_extension(f, dom.y)
+            f_ext, y_ext = StirMix.even_extension(f, ỹ)
             @test isapprox(f_ext, gauss.(y_ext, yc) .+ gauss.(y_ext, 2pi - yc);
                 atol = 1e-13, norm = mx)
             # its Fourier coefficients from y_modes against the analytic ones
@@ -711,12 +730,12 @@ end
             @test isapprox(γ_o, zero(γ_o); atol = 1e-13, norm = mx)
         end
 
-        # Create ics centered at 2y = y0 = π: the coefficients of cos(2my) on the channel are
+        # Create ics centred at physical y = 2ỹ = y0 = π: the coefficients of cos(2mỹ) are
         # Ck[m] = (1 / (Ld √π)) e^{-i m y0} e^{-(m / (2Ld))²} = (-1)^m (…), real. On the
-        # doubled domain cos(2my) is mode n = 2m, so the extended coefficients are Ck
+        # doubled domain cos(2mỹ) is mode n = 2m, so the extended coefficients are Ck
         # interleaved with zeros, and the non-extended ones are Ck itself.
         y0 = π
-        fy = exp.(-(Ld^2) .* (2 .* dom.y .- y0) .^ 2)
+        fy = exp.(-(Ld^2) .* (dom.y .- y0) .^ 2)  # physical y = 2ỹ, centred at y = y0
         Ck = [(1 / (Ld * sqrt(pi))) * exp(-im * m * y0) * exp(-(m / (2Ld))^2)
               for m in 0:(Ny ÷ 2 - 1)]
         @test isapprox(imag.(Ck), zero(real.(Ck)); atol = 1e-14, norm = mx)
@@ -732,7 +751,7 @@ end
         Ny = 200
         dom = domain(pi, 1, Nx, Ny)
         # define purely odd flow field
-        U_linear = dom.y / π
+        U_linear = dom.y / (2π)  # = ỹ/π
 
         U, α0, α, _ = StirMix.flow_decomposition(U_linear, dom)
 
@@ -752,32 +771,33 @@ end
         # Initial condition in cross-stream direction
         # ==================================
         σ2_y0 = 1 / 40
-        g = @. exp(-(((dom.y - pi / 4) / (sqrt(2 * σ2_y0))) .^ 2))
-        χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(g, 2 * dom.y; Lx = 2π)
+        g = @. exp(-(((dom.y - pi / 2) / (2sqrt(2 * σ2_y0))) .^ 2))
+        χ_0, χ_e, γ_o = StirMix.normal_mode_decomposition(g, dom.y; Lx = 2π)
         γ_e = vcat(χ_0, χ_e)
 
         NMax = 10 # Tail data begins with the following normal mode
         Nnm = length(γ_e) - NMax # how many tail cosine modes there will be
         NNmo = length(γ_o) - NMax
 
-        m_etail, Atail, γ_etail, _ = StirMix.cosine_tail_data(dom.y, γ_e, NMax)
-        m_otail, Btail, γ_otail, _ = StirMix.sine_tail_data(dom.y, γ_o, NMax)
+        m_etail, Atail, γ_etail, _ = StirMix.cosine_tail_data(
+            StirMix._ytilde(dom), γ_e, NMax)
+        m_otail, Btail, γ_otail, _ = StirMix.sine_tail_data(StirMix._ytilde(dom), γ_o, NMax)
 
         @test size(Atail) == (length(dom.y), Nnm)
         @test γ_etail[1] === γ_e[NMax + 1]
         @test γ_otail[1] === γ_o[NMax + 1]
 
-        @test isapprox(Atail[:, 1], cos.(NMax * 2 * dom.y); atol = 1e-4, rtol = 1e-4)
-        @test isapprox(Btail[:, 1], sin.((NMax + 1) * 2 * dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Atail[:, 1], cos.(NMax * dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Btail[:, 1], sin.((NMax + 1) * dom.y); atol = 1e-4, rtol = 1e-4)
 
-        @test isapprox(Atail[:, 1], cos.(m_etail[1] * 2 * dom.y); atol = 1e-4, rtol = 1e-4)
-        @test isapprox(Btail[:, 1], sin.(m_otail[1] * 2 * dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Atail[:, 1], cos.(m_etail[1] * dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Btail[:, 1], sin.(m_otail[1] * dom.y); atol = 1e-4, rtol = 1e-4)
 
-        @test isapprox(Atail[:, 2], cos.(m_etail[2] * 2 * dom.y); atol = 1e-4, rtol = 1e-4)
-        @test isapprox(Btail[:, 2], sin.(m_otail[2] * 2 * dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Atail[:, 2], cos.(m_etail[2] * dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Btail[:, 2], sin.(m_otail[2] * dom.y); atol = 1e-4, rtol = 1e-4)
 
-        @test isapprox(Atail[:, 5], cos.(m_etail[5] * 2 * dom.y); atol = 1e-4, rtol = 1e-4)
-        @test isapprox(Btail[:, 5], sin.(m_otail[5] * 2 * dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Atail[:, 5], cos.(m_etail[5] * dom.y); atol = 1e-4, rtol = 1e-4)
+        @test isapprox(Btail[:, 5], sin.(m_otail[5] * dom.y); atol = 1e-4, rtol = 1e-4)
     end
 
     @testset "test initial condition mapping in y" begin
@@ -793,7 +813,7 @@ end
         # Initial condition in cross-stream direction
         # ==================================
         σ2_y0 = 1 / 40
-        g = @. exp(-(((dom.y - pi / 4) / (sqrt(2 * σ2_y0))) .^ 2))
+        g = @. exp(-(((dom.y - pi / 2) / (2sqrt(2 * σ2_y0))) .^ 2))
 
         σ2_0 = 100
         f = @. 1 * exp(-(((dom.x + 0) / (sqrt(2 * σ2_0))) .^ 2))
@@ -831,7 +851,7 @@ end
         # Initial condition in cross-stream direction
         # ==================================
         σ2_y0 = 1000
-        g = @. exp(-(((dom.y - pi / 4) / (sqrt(2 * σ2_y0))) .^ 2))
+        g = @. exp(-(((dom.y - pi / 2) / (2sqrt(2 * σ2_y0))) .^ 2))
 
         σ2_0 = 1 / 100
         f = @. 1 * exp(-(((dom.x + 0) / (sqrt(2 * σ2_0))) .^ 2))
@@ -879,12 +899,12 @@ end
         @testset "Case 1: phi_new=π/2 phi_old=π" begin
             phi_new = 0.5 * π
             phi_old = π
-            Phi = exp.(-0.5 .* (2dom.y .- phi_old) .^ 2 ./ (0.5 * Ld1^2))
-            expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)) .^ 2 ./ (0.5 * Ld1^2))
+            Phi = exp.(-0.5 .* (dom.y .- phi_old) .^ 2 ./ (0.5 * Ld1^2))
+            expected = exp.(-0.5 .* (dom.y .- (phi_old - phi_new)) .^ 2 ./ (0.5 * Ld1^2))
             even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(
-                Phi, 2 .* dom.y; phi_new = phi_new, phi_old = phi_old)
+                Phi, dom.y; phi_new = phi_new, phi_old = phi_old)
             reconstructed = StirMix.reconstruct_fourier_series(
-                collect(2 * dom.y), even_c[1], even_c[2:end], odd_c; Lx = 2 * π)
+                collect(dom.y), even_c[1], even_c[2:end], odd_c; Lx = 2 * π)
             @test isapprox(reconstructed, expected; atol = 1e-4, rtol = 1e-4)
             @test isapprox(nphi_new, phi_old - phi_new; atol = 1e-4, rtol = 1e-4)
             @test isapprox(nphi_old, phi_old + phi_new; atol = 1e-4, rtol = 1e-4)
@@ -892,12 +912,12 @@ end
         @testset "Case 2: phi_new=π/4 phi_old=π/2" begin
             phi_new = 0.25 * π
             phi_old = 0.5 * π
-            Phi = exp.(-0.5 .* (2dom.y .- phi_old) .^ 2 ./ (0.5 * Ld1^2))
-            expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)) .^ 2 ./ (0.5 * Ld1^2))
+            Phi = exp.(-0.5 .* (dom.y .- phi_old) .^ 2 ./ (0.5 * Ld1^2))
+            expected = exp.(-0.5 .* (dom.y .- (phi_old - phi_new)) .^ 2 ./ (0.5 * Ld1^2))
             even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(
-                Phi, 2 .* dom.y; phi_new = phi_new, phi_old = phi_old)
+                Phi, dom.y; phi_new = phi_new, phi_old = phi_old)
             reconstructed = StirMix.reconstruct_fourier_series(
-                collect(2 * dom.y), even_c[1], even_c[2:end], odd_c; Lx = 2 * π)
+                collect(dom.y), even_c[1], even_c[2:end], odd_c; Lx = 2 * π)
             @test isapprox(reconstructed, expected; atol = 1e-4, rtol = 1e-4)
             @test isapprox(nphi_new, phi_old - phi_new; atol = 1e-4, rtol = 1e-4)
             @test isapprox(nphi_old, phi_old + phi_new; atol = 1e-4, rtol = 1e-4)
@@ -906,14 +926,14 @@ end
         @testset "Case 3: phi_new=π phi_old=π" begin
             phi_new = π
             phi_old = π
-            Phi = exp.(-0.5 .* (2dom.y .- phi_old) .^ 2 ./ (0.5 * Ld1^2))
-            expected = exp.(-0.5 .* (2dom.y .- (phi_old - phi_new)) .^ 2 ./ (0.5 * Ld1^2)) +
-                       exp.(-0.5 .* (2dom.y .- 2π) .^ 2 ./ (0.5 * Ld1^2))
+            Phi = exp.(-0.5 .* (dom.y .- phi_old) .^ 2 ./ (0.5 * Ld1^2))
+            expected = exp.(-0.5 .* (dom.y .- (phi_old - phi_new)) .^ 2 ./ (0.5 * Ld1^2)) +
+                       exp.(-0.5 .* (dom.y .- 2π) .^ 2 ./ (0.5 * Ld1^2))
 
             even_c, odd_c, nphi_new, nphi_old = StirMix.coeff_project(
-                Phi, 2 .* dom.y; phi_new = phi_new)
+                Phi, dom.y; phi_new = phi_new)
             reconstructed = StirMix.reconstruct_fourier_series(
-                collect(2 * dom.y), even_c[1], even_c[2:end], odd_c; Lx = 2 * π)
+                collect(dom.y), even_c[1], even_c[2:end], odd_c; Lx = 2 * π)
             @test isapprox(reconstructed, expected; atol = 1e-4, rtol = 1e-4)
             @test isapprox(nphi_new, π; atol = 1e-4, rtol = 1e-4)
             @test isapprox(nphi_old, 2 * π; atol = 1e-4, rtol = 1e-4)
@@ -932,7 +952,7 @@ end
         @testset "Case 1: separable gaussian stripe IVP" begin
             # Initial condition in cross-stream direction
             σ2_y0 = 1000
-            g = @. exp(-(((dom.y - pi / 2) / (sqrt(2 * σ2_y0))) .^ 2))
+            g = @. exp(-(((dom.y - pi) / (2sqrt(2 * σ2_y0))) .^ 2))
             σ2_x = 10
             X0 = 0
             f = @. exp(-((dom.x - X0) / sqrt(2 * σ2_x)) .^ 2)
@@ -945,7 +965,7 @@ end
         end
         @testset "Case 2: non-separable IVP" begin
             σ2_y0 = 1 / 5
-            g = @. exp(-(((dom.y - pi / 2) / (sqrt(2 * σ2_y0))) .^ 2))
+            g = @. exp(-(((dom.y - pi) / (2sqrt(2 * σ2_y0))) .^ 2))
             σ2_x = 50
             X0 = 0
             f = @. exp(-((dom.x - X0) / sqrt(2 * σ2_x)) .^ 2)
@@ -953,8 +973,8 @@ end
             Z = g * transpose(f)
             f1 = @. cos(pi * dom.x / (L / 2)) - sin(pi * dom.x / (L / 4))
             f2 = @. sin(pi * dom.x / (L / 2)) + cos(pi * dom.x / (L / 4))
-            g1 = @. cos(2pi * dom.y)
-            g2 = @. sin(2pi * dom.y)
+            g1 = @. cos(pi * dom.y)
+            g2 = @. sin(pi * dom.y)
             Z1 = g1 * f1'
             Z2 = g2 * f2'
             Zn = Z .* (Z1 + Z2)
@@ -972,7 +992,7 @@ end
         L = 100 # how much bigger is the x-domain than cross-stream
         dom = domain(L, M, Nx, Ny)
         σ2_y0 = 1 / 50
-        g = @. exp(-(((dom.y - pi / 2) / (sqrt(2 * σ2_y0))) .^ 2))
+        g = @. exp(-(((dom.y - pi) / (2sqrt(2 * σ2_y0))) .^ 2))
         σ2_x = 10
         X0 = -20
         f = @. exp(-((dom.x - X0) / sqrt(2 * σ2_x)) .^ 2)
@@ -1001,7 +1021,7 @@ end
         dom = domain(200, 1, 2500, 250)
 
         σ2_y0 = 1 / 10
-        g_c = @. exp(-(((dom.y - pi / 2) / (sqrt(2 * σ2_y0))) .^ 2))
+        g_c = @. exp(-(((dom.y - pi) / (2sqrt(2 * σ2_y0))) .^ 2))
 
         tvals = range(0, 0.2, length = 10)
         ft = sin.(5π .* tvals)
@@ -1033,7 +1053,7 @@ end
         Pe = 100
         dom = domain(200, 1, 2500, 250)
         σ2_y0 = 1 / 10
-        g_c = @. exp(-(((dom.y - pi / 2) / (sqrt(2 * σ2_y0))) .^ 2))
+        g_c = @. exp(-(((dom.y - pi) / (2sqrt(2 * σ2_y0))) .^ 2))
         tvals = range(0, 0.2, length = 10)
         ft = sin.(5π .* tvals)
 
@@ -1055,7 +1075,7 @@ end
         Pe = 100
         dom = domain(200, 1, 2500, 250)
         σ2_y0 = 1 / 10
-        g_c = @. exp(-(((dom.y - pi / 2) / (sqrt(2 * σ2_y0))) .^ 2))
+        g_c = @. exp(-(((dom.y - pi) / (2sqrt(2 * σ2_y0))) .^ 2))
         tvals = range(0, 0.2, length = 10)
         ft = sin.(5π .* tvals)
 
@@ -1085,7 +1105,7 @@ end
             basis = spectral_basis(flow, 100, dom, 60; show_progress = false,
                 compute_odd = true)
             for y0 in (π / 2, 2.4)   # define centering via y0
-                g = @. exp(-((dom.y - y0)^2) / 0.2)
+                g = @. exp(-((dom.y - 2y0)^2) / 0.8)  # y0 is the centre in ỹ
                 T_avg = evolve_explicit_avg(dom, basis, g, Cmodes, tvals;
                     show_progress = false)
                 T_2d = solve_explicit(dom, basis, g * transpose(fx), tvals;
