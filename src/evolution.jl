@@ -693,6 +693,67 @@ function solve_explicit(dom::Domain, bases::BasesIter,
     return T
 end
 
+# --- rotated shear flow (FR-011): physical frame <-> solver frame of a RotatedDomain ---
+
+function _require_rotatable_basis(basis::SpectralBasis)
+    basis.even_extension && throw(ArgumentError(
+        "a rotated flow must be even about the channel center; this basis uses the " *
+        "even periodic extension"))
+    return nothing
+end
+
+# solver output (t, y′, x′) -> physical (t, y, x): x ↔ y′ and y ↔ x′
+_rotated_to_phys(T::AbstractArray{<:Real, 3}) = permutedims(T, (1, 3, 2))
+_rotated_to_phys(out::Tuple) = (_rotated_to_phys(out[1]), Base.tail(out)...)
+
+"""
+    solve_explicit(rd::RotatedDomain, basis, T0::Matrix{Float64}, tvals; Pe, kwargs...)
+
+2-D solution for a shear flow rotated by 90°, with `basis` from
+`spectral_basis(flow, Pe, rd, Ns)`. Everything is in the physical frame of `rd`:
+`T0` is `(length(rd.phys.y), length(rd.phys.x))` (rows are y), `tvals` are physical
+times, an optional `Pe` keyword is the physical Péclet number, and the result is
+`T[t, y, x]` on `rd.phys`. Internally the solve runs on `rd.solver` with the initial
+condition transposed, `t′ = t/L²` and `Pe′ = Pe·L`. Other keywords are passed through.
+"""
+function solve_explicit(rd::RotatedDomain, basis::SpectralBasis, T0::Matrix{Float64},
+        tvals; Pe::Union{Nothing, Real} = nothing, kwargs...)
+    _require_rotatable_basis(basis)
+    size(T0) == (length(rd.phys.y), length(rd.phys.x)) || throw(DimensionMismatch(
+        "T0 must be (length(rd.phys.y), length(rd.phys.x)) = " *
+        "$((length(rd.phys.y), length(rd.phys.x))); got $(size(T0))"))
+    out = solve_explicit(rd.solver, basis, permutedims(T0),
+        _collect_tvals(tvals) ./ rd.L^2;
+        Pe = Pe === nothing ? nothing : Pe * rd.L, kwargs...)
+    return _rotated_to_phys(out)
+end
+
+"""
+    solve_explicit(rd::RotatedDomain, basis, fx, Ccoeffs, tvals; Pe, kwargs...)
+
+As the `T0` method, with the initial condition `fx(x)·f(y)`: `fx` is the cross-stream
+profile sampled on `rd.phys.x`, and `Ccoeffs[k]` are the along-stream Fourier
+coefficients of `f(y) = Σ real(Ccoeffs[k]·e^{i(k−1)y})` on `rd.phys.y`. In the solver
+frame they become `(−1)^(k−1)·Ccoeffs[k]`, since `y = L·x′ + π`. Returns what the
+`Domain` method with the same argument types returns, with `T` in the physical layout
+`T[t, y, x]`; a returned `spectrum_star` stays in the solver layout `(y′, k′)`.
+"""
+function solve_explicit(rd::RotatedDomain, basis::SpectralBasis,
+        fx::Union{Vector{Float64}, Vector{ComplexF64}}, Ccoeffs::Vector{<:Number}, tvals;
+        Pe::Union{Nothing, Real} = nothing, kwargs...)
+    _require_rotatable_basis(basis)
+    length(fx) == length(rd.phys.x) || throw(DimensionMismatch(
+        "fx must be sampled on rd.phys.x (length $(length(rd.phys.x))); " *
+        "got length $(length(fx))"))
+    length(Ccoeffs) == length(rd.solver.K) || throw(DimensionMismatch(
+        "Ccoeffs must have length(rd.solver.K) = $(length(rd.solver.K)) entries; " *
+        "got $(length(Ccoeffs))"))
+    C′ = [(-1)^(k - 1) * Ccoeffs[k] for k in eachindex(Ccoeffs)]
+    out = solve_explicit(rd.solver, basis, fx, C′, _collect_tvals(tvals) ./ rd.L^2;
+        Pe = Pe === nothing ? nothing : Pe * rd.L, kwargs...)
+    return _rotated_to_phys(out)
+end
+
 function _avg_work_scratch(work)
     return [AvgModeWork(w.A0, w.λ, w.γproj, similar(w.e)) for w in work]
 end
