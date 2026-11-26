@@ -412,9 +412,8 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
     if basis.even_extension
         fac = 0.5
         ny = 2 * length(dom.y)
-        dx = dom.x[2] - dom.x[1]
-        _L = dom.x[end] - dom.x[1] + dx
-        _dom = domain(_L, 1, length(dom.x), ny)
+        # same aspect ratio, doubled y grid; dom.L, not the grid period
+        _dom = domain(dom.L, dom.M, length(dom.x), ny)
     else
         fac = 1.0
         ny = length(dom.y)
@@ -497,9 +496,8 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64
     if basis.even_extension
         fac = 0.5
         ny = 2 * length(dom.y)
-        dx = dom.x[2] - dom.x[1]
-        _L = dom.x[end] - dom.x[1] + dx
-        _dom = domain(_L, 1, length(dom.x), ny)
+        # same aspect ratio, doubled y grid; dom.L, not the grid period 
+        _dom = domain(dom.L, dom.M, length(dom.x), ny)
     else
         fac = 1.0
         ny = length(dom.y)
@@ -580,16 +578,18 @@ function solve_explicit(dom::Domain, basis::SpectralBasis,
         parallel::Bool = true,
         compute_Φky::Bool = false)
     # period of the uniform x grid; valid for any offset of x[1]
-    L = dom.x[end] - dom.x[1] + (dom.x[2] - dom.x[1])
+    # (this is 2π·dom.L, not dom.L )
+    x_period = dom.x[end] - dom.x[1] + (dom.x[2] - dom.x[1])
     # x-decomposition first; the y-extension (if any) acts row-independently, so it
     # is applied afterwards to the coefficients
-    c0_2D, ce_2D, co_2D = normal_mode_decomposition(T0, dom.x; Lx = L, dim = 2)
+    c0_2D, ce_2D, co_2D = normal_mode_decomposition(T0, dom.x; Lx = x_period, dim = 2)
     Ces = hcat(c0_2D ./ 2, complex_x_coeffs(ce_2D, co_2D))
     γ, γ_o = y_modes(Ces, dom; extend = basis.even_extension)
     if basis.even_extension
         fac = 0.5
         ny = 2 * length(dom.y)
-        _dom = domain(L, 1, length(dom.x), ny)
+        # same aspect ratio, doubled y grid; dom.L, not the grid period
+        _dom = domain(dom.L, dom.M, length(dom.x), ny)
     else
         fac = 1.0
         ny = length(dom.y)

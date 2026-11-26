@@ -1,4 +1,7 @@
 const _SPECTRAL_DATA_SCHEMA_VERSION = 1
+
+# Meaning of `domain_L` in a saved basis.
+const _X_PERIOD_CONVENTION = "aspect_ratio"
 const _SPECTRAL_IO_MODES = (:compute, :read, :write, :refresh)
 
 """
@@ -273,6 +276,7 @@ function _write_spectral_data(path::AbstractString, basis::SpectralBasis, meta)
             f["meta/compute_odd"] = meta.compute_odd
             f["meta/even_extension"] = meta.even_extension
             f["meta/domain_L"] = meta.domain_L
+            f["meta/x_period_convention"] = _X_PERIOD_CONVENTION
             f["meta/domain_M"] = meta.domain_M
             f["meta/domain_Nx"] = meta.domain_Nx
             f["meta/domain_Ny"] = meta.domain_Ny
@@ -316,6 +320,12 @@ function _read_spectral_data(path::AbstractString)
         throw(ArgumentError("filename does not exist: $path"))
 
     return jldopen(path, "r") do f
+        convention = haskey(f, "meta/x_period_convention") ?
+                     String(f["meta/x_period_convention"]) : nothing
+        convention == _X_PERIOD_CONVENTION || throw(ArgumentError(
+            "spectral data in $path was written with an x period of L, before L " *
+            "became the aspect ratio (x period 2πL); recompute it with " *
+            "spectral_io = :write"))
         nk = Int(_require_spectral_key(f, "data/nk"))
         has_odd = Bool(_require_spectral_key(f, "data/has_odd"))
 

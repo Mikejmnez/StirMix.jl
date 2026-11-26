@@ -66,7 +66,8 @@ function capture_stderr(f)
 end
 
 @testset "StirMix.jl" begin
-    dom = domain(pi, 1, 8, 50)
+    # aspect ratio 1/2: x period π, the same grid and q values as before
+    dom = domain(0.5, 1, 8, 50)
     fy_odd = @. sin.(dom.y)
     fy_even = @. cos.(dom.y)
     Pe = 1.0
@@ -567,7 +568,7 @@ end
 
     @testset "domain y grid: physical coordinate (TASK-004)" begin
         # dom.y is the physical cross-stream coordinate: Ny cell-centred points on
-        # (0, 2π) (ADR-001). The internals use ỹ = dom.y / 2, which is bit for bit the
+        # (0, 2π). The internals use ỹ = dom.y / 2, which is bit for bit the
         # grid used before dom.y moved to the physical coordinate.
         for Ny in (16, 125, 128)
             dom = domain(10, 1, 8, Ny)
@@ -601,16 +602,17 @@ end
         mx(v) = maximum(abs, v)
         # Trig polynomials with known, nonzero coefficients in every family, so the
         # decomposition is checked against exact values: a phase/offset error (e.g. a
-        # wrong Lx on the cell-centred grid, ADR-001) cannot cancel out.
+        # wrong Lx on the cell-centred grid) cannot cancel out.
         # g, in the physical y (period 2π): a0 = 0.6, a1 = 1, b2 = 0.5
         g = @. 0.3 + cos(dom.y) + 0.5 * sin(2dom.y)
-        # f, period L = 10: cos(2πx) is mode 10 (a10 = 1), sin(3πx) is mode 15 (b15 = -1)
-        f = @. cos(2π * dom.x) - sin(3π * dom.x)
+        # f, x period 2πL (L = 10 is the aspect ratio): cos(10x/L) is mode 10
+        # (a10 = 1), sin(15x/L) is mode 15 (b15 = -1)
+        f = @. cos(10 * dom.x / L) - sin(15 * dom.x / L)
         Z = (f * g')'
 
         # 1-D decompositions against the exact coefficients
         γ0, γe, γo = StirMix.normal_mode_decomposition(g, dom.y; Lx = 2π)
-        c0, ce, co = StirMix.normal_mode_decomposition(f, dom.x; Lx = L)
+        c0, ce, co = StirMix.normal_mode_decomposition(f, dom.x; Lx = 2π * L)
         γe_exact = zeros(length(γe))
         γe_exact[1] = 1.0
         γo_exact = zeros(length(γo))
@@ -627,7 +629,8 @@ end
         @test isapprox(co, co_exact; atol = 1e-12, norm = mx)
 
         # decomposition along x of the 2-D array, row by row, equals g(y) times the 1-D one
-        c0_2D, ce_2D, co_2D = StirMix.normal_mode_decomposition(Z, dom.x; Lx = L, dim = 2)
+        c0_2D, ce_2D, co_2D = StirMix.normal_mode_decomposition(
+            Z, dom.x; Lx = 2π * L, dim = 2)
         @test isapprox(c0_2D, c0 .* g; atol = 1e-12, norm = mx)
         @test isapprox(ce_2D, g * transpose(ce); atol = 1e-12, norm = mx)
         @test isapprox(co_2D, g * transpose(co); atol = 1e-12, norm = mx)
@@ -853,9 +856,11 @@ end
         σ2_y0 = 1000
         g = @. exp(-(((dom.y - pi / 2) / (2sqrt(2 * σ2_y0))) .^ 2))
 
-        σ2_0 = 1 / 100
+        # x period is 2πL; the width scales with it, so the Gaussian keeps
+        # the same shape relative to the domain and the same resolution as before
+        σ2_0 = (2π)^2 / 100
         f = @. 1 * exp(-(((dom.x + 0) / (sqrt(2 * σ2_0))) .^ 2))
-        c0, ce, co = StirMix.normal_mode_decomposition(f, dom.x; Lx = L)
+        c0, ce, co = StirMix.normal_mode_decomposition(f, dom.x; Lx = 2π * L)
         Ccoeffs = vcat(c0 / 2, StirMix.complex_x_coeffs(ce, co))
 
         basis = spectral_basis(:poiseuille, Pe, dom, 100; show_progress = false,
@@ -971,8 +976,9 @@ end
             f = @. exp(-((dom.x - X0) / sqrt(2 * σ2_x)) .^ 2)
             # get 2D initial condition from separable components
             Z = g * transpose(f)
-            f1 = @. cos(pi * dom.x / (L / 2)) - sin(pi * dom.x / (L / 4))
-            f2 = @. sin(pi * dom.x / (L / 2)) + cos(pi * dom.x / (L / 4))
+            # modes 2 and 4 of the x period 2πL
+            f1 = @. cos(2 * dom.x / L) - sin(4 * dom.x / L)
+            f2 = @. sin(2 * dom.x / L) + cos(4 * dom.x / L)
             g1 = @. cos(pi * dom.y)
             g2 = @. sin(pi * dom.y)
             Z1 = g1 * f1'
@@ -1113,6 +1119,61 @@ end
                 y_mean = dropdims(sum(T_2d; dims = 2); dims = 2) ./ length(dom.y)
                 @test maximum(abs.(T_avg .- y_mean)) ≤ 1e-12
             end
+        end
+    end
+
+    @testset "domain: L is the aspect ratio, x period 2πL" begin
+        decay_rate(T, t) = -log(maximum(abs, T[2, :, :]) / maximum(abs, T[1, :, :])) / t
+        t = 0.1
+        for L in (1, 4)
+            dom = domain(L, 1, 32, 32)
+            Δx = dom.x[2] - dom.x[1]
+            @test isapprox(dom.x[end] - dom.x[1] + Δx, 2π * L; rtol = 1e-14)
+            @test isapprox(2π .* dom.K, (0:16) ./ L; rtol = 1e-14)
+            # pure diffusion (Pe = 0): one cycle across x decays at 1/L², one cycle
+            # across y at 1. On the square (L = 1) the two are equal.
+            basis = spectral_basis(:cos, 0.0, dom, 20; show_progress = false)
+            Tx = solve_explicit(dom, basis, [cos(x / L) for y in dom.y, x in dom.x],
+                [0.0, t]; show_progress = false)
+            Ty = solve_explicit(dom, basis, [cos(y) for y in dom.y, x in dom.x],
+                [0.0, t]; show_progress = false)
+            @test isapprox(decay_rate(Tx, t), 1 / L^2; rtol = 1e-10)
+            @test isapprox(decay_rate(Ty, t), 1.0; rtol = 1e-10)
+        end
+
+        # The even-extension 2-D paths rebuild a domain internally; it must keep the
+        # aspect ratio (dom.L, not the grid period). The averaged path uses dom
+        # directly, so the 2-D y-mean must match it.
+        dom = domain(4, 1, 64, 32)
+        basis = spectral_basis(:linear, 10, dom, 40; show_progress = false,
+            compute_odd = true)
+        @test basis.even_extension
+        tvals = range(0, 0.2, length = 5)
+        C = zeros(ComplexF64, length(dom.K))
+        C[2] = 1
+        g = @. exp(-((dom.y - π / 2)^2) / 0.2)
+        T_avg = evolve_explicit_avg(dom, basis, g, C, tvals; show_progress = false)
+        fx = StirMix.reconstruct_from_complex_coeffs(dom.x, 2π * dom.K, C)
+        ymean(T) = dropdims(sum(T; dims = 2); dims = 2) ./ length(dom.y)
+        T_T0 = solve_explicit(dom, basis, g * transpose(fx), tvals; show_progress = false)
+        T_fy = solve_explicit(dom, basis, g, C, tvals; show_progress = false)
+        @test maximum(abs.(T_avg .- ymean(T_T0))) ≤ 1e-12
+        @test maximum(abs.(T_avg .- ymean(T_fy))) ≤ 1e-12
+
+        # a saved basis without the x-period convention marker (written before the
+        # fix) is rejected on read
+        mktempdir() do tmp
+            path = joinpath(tmp, "old-convention.jld2")
+            d = domain(1, 1, 8, 16)
+            spectral_basis(:cos, 1.0, d, 10; show_progress = false,
+                filename = path, spectral_io = :write)
+            @test spectral_basis(:cos, 1.0, d, 10; filename = path,
+                spectral_io = :read) isa StirMix.SpectralBasis
+            jldopen(path, "a+") do f
+                delete!(f, "meta/x_period_convention")
+            end
+            @test_throws ArgumentError spectral_basis(:cos, 1.0, d, 10;
+                filename = path, spectral_io = :read)
         end
     end
 
