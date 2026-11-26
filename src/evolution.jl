@@ -60,7 +60,7 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
         fill!(projection, zero(Tproj))
     end
 
-    By = _cosine_y_basis(dom.y, R)
+    By = _cosine_y_basis(_ytilde(dom), R)
     Tfield = promote_type(eltype(By), eltype(projection))
 
     e = Vector{ComplexF64}(undef, Nn)
@@ -68,7 +68,7 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
     coeff_y = Vector{Tproj}(undef, R)
     f = Vector{Tfield}(undef, length(dom.y))
 
-    tail = cosine_tail_data(dom.y, γ, Nn)
+    tail = cosine_tail_data(_ytilde(dom), γ, Nn)
 
     Bk = nothing
     λ_o = nothing
@@ -98,7 +98,7 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
             fill!(projection_o, zero(Tproj_o))
         end
 
-        By_o = _sine_y_basis(dom.y, R_o)
+        By_o = _sine_y_basis(_ytilde(dom), R_o)
         Tfield_o = promote_type(eltype(By_o), eltype(projection_o))
 
         e_o = Vector{ComplexF64}(undef, Nno)
@@ -106,7 +106,7 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
         coeff_y_o = Vector{Tproj_o}(undef, R_o)
         f_o = Vector{Tfield_o}(undef, length(dom.y))
 
-        tail_o = sine_tail_data(dom.y, γ_o, R_o)
+        tail_o = sine_tail_data(_ytilde(dom), γ_o, R_o)
     end
 
     return (Ak = Ak, λ = λ, projection = projection, By = By, e = e,

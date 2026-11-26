@@ -378,7 +378,7 @@ coefficients β_0 and β_e.
 """
 function flow_decomposition(U::AbstractVector, domain::Domain)
     even_extension = false
-    y = domain.y
+    y = _ytilde(domain)  # Hill variable ỹ
     β0, β, β_o = normal_mode_decomposition(U, 2 .* y; Lx = 2π)
     nb = length(β_o) ÷ 2
     if any(abs.(β_o[1:nb]) .> 1e-2)
