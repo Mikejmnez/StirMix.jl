@@ -570,7 +570,59 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64
     return (T, spectrum_star)
 end
 
+"""
+    _shift_steps(shift, y, period = 2π) -> (m, actual_shift)
+
+The whole number of grid steps `m` whose displacement `m·Δy`, with `Δy = period/length(y)`,
+is nearest to `shift`, on the uniform periodic grid `y`; and that displacement. `shift`
+must be in `[0, period]`; `shift = period` gives `m = 0`. The shift is snapped to a
+multiple of the spacing, not to a grid point, so `circshift` by `m` rows is exact. A
+half-way value rounds to the even `m`.
+"""
+function _shift_steps(shift::Real, y::AbstractVector, period::Real = 2π)
+    0 ≤ shift ≤ period ||
+        throw(ArgumentError("shift must be in [0, $period]; got $shift"))
+    n = length(y)
+    Δy = period / n
+    m = mod(round(Int, shift / Δy), n)
+    return m, m * Δy
+end
+
+"""
+    solve_explicit(dom::Domain, basis, T0::Matrix{Float64}, tvals; shift = 0.0,
+        β0, Pe, show_progress = true, parallel = true, compute_Φky = false)
+
+2-D solution `T[t, y, x]` from the initial condition `T0[y, x]`, in the shear flow of
+`basis`.
+
+`shift` moves the flow along its shear direction, `U(y) → U(y − s)`, without a new
+basis: `T0` is moved by `−s`, evolved in the unshifted flow and the result moved back
+by `+s`. `shift` must be a real number in `[0, 2π]`; the shift actually applied is the
+nearest whole number of grid steps, `s = m·Δy` with `m = round(shift/Δy)` and
+`Δy = 2π/length(dom.y)`, so it can differ from `shift` by up to `Δy/2`. A non-zero
+shift is not supported for a basis that uses the even periodic extension (the y
+direction then has walls). With `compute_Φky = true`, the returned `spectrum_star` is
+moved back in y as well.
+"""
 function solve_explicit(dom::Domain, basis::SpectralBasis,
+        T0::Matrix{Float64}, tvals;
+        shift::Real = 0.0,
+        compute_Φky::Bool = false,
+        kwargs...)
+    m, _ = _shift_steps(shift, dom.y)
+    m == 0 && return _solve_explicit_T0(dom, basis, T0, tvals;
+        compute_Φky = compute_Φky, kwargs...)
+    basis.even_extension && throw(ArgumentError(
+        "a non-zero shift is not supported for a basis that uses the even periodic " *
+        "extension (the y direction has walls)"))
+    out = _solve_explicit_T0(dom, basis, circshift(T0, (-m, 0)), tvals;
+        compute_Φky = compute_Φky, kwargs...)
+    compute_Φky || return circshift(out, (0, m, 0))
+    T, spectrum_star = out
+    return (circshift(T, (0, m, 0)), circshift(spectrum_star, (m, 0)))
+end
+
+function _solve_explicit_T0(dom::Domain, basis::SpectralBasis,
         T0::Matrix{Float64}, tvals;
         β0::Union{Nothing, Real} = nothing,
         Pe::Union{Nothing, Real} = nothing,
@@ -705,7 +757,8 @@ _rotated_to_phys(T::AbstractArray{<:Real, 3}) = permutedims(T, (1, 3, 2))
 _rotated_to_phys(out::Tuple) = (_rotated_to_phys(out[1]), Base.tail(out)...)
 
 """
-    solve_explicit(rd::RotatedDomain, basis, T0::Matrix{Float64}, tvals; Pe, kwargs...)
+    solve_explicit(rd::RotatedDomain, basis, T0::Matrix{Float64}, tvals; Pe, shift = 0.0,
+        kwargs...)
 
 2-D solution for a shear flow rotated by 90°, with `basis` from
 `spectral_basis(flow, Pe, rd, Ns)`. Everything is in the physical frame of `rd`:
@@ -713,16 +766,22 @@ _rotated_to_phys(out::Tuple) = (_rotated_to_phys(out[1]), Base.tail(out)...)
 times, an optional `Pe` keyword is the physical Péclet number, and the result is
 `T[t, y, x]` on `rd.phys`. Internally the solve runs on `rd.solver` with the initial
 condition transposed, `t′ = t/L²` and `Pe′ = Pe·L`. Other keywords are passed through.
+
+`shift` moves the rotated flow along physical x, `V(x) ŷ → V(x − s) ŷ`. It must be a
+real number in `[0, 2π]` and is passed to the solver frame as `shift/L`, where it is
+snapped to the nearest whole number of grid steps (see the `Domain` method), so the
+shift actually applied can differ from `shift` by up to half a grid step.
 """
 function solve_explicit(rd::RotatedDomain, basis::SpectralBasis, T0::Matrix{Float64},
-        tvals; Pe::Union{Nothing, Real} = nothing, kwargs...)
+        tvals; Pe::Union{Nothing, Real} = nothing, shift::Real = 0.0, kwargs...)
+    0 ≤ shift ≤ 2π || throw(ArgumentError("shift must be in [0, 2π]; got $shift"))
     _require_rotatable_basis(basis)
     size(T0) == (length(rd.phys.y), length(rd.phys.x)) || throw(DimensionMismatch(
         "T0 must be (length(rd.phys.y), length(rd.phys.x)) = " *
         "$((length(rd.phys.y), length(rd.phys.x))); got $(size(T0))"))
     out = solve_explicit(rd.solver, basis, permutedims(T0),
         _collect_tvals(tvals) ./ rd.L^2;
-        Pe = Pe === nothing ? nothing : Pe * rd.L, kwargs...)
+        Pe = Pe === nothing ? nothing : Pe * rd.L, shift = shift / rd.L, kwargs...)
     return _rotated_to_phys(out)
 end
 
@@ -754,7 +813,7 @@ end
 
 """
     renewing_flows(rd::RotatedDomain, basis, rdbasis, T0::Matrix{Float64}, tvals, nΔt = 1;
-        show_progress = true, kwargs...)
+        shifts = nothing, show_progress = true, kwargs...)
 
 Evolve `T0` in a renewing flow on the square box `rd` (`rd.L == 1`) that alternates a
 shear flow with its 90° rotation. The non-rotated flow (`basis`, from
@@ -770,11 +829,17 @@ with `tvals = 0:δt:…` the first flow lasts one step less. Start `tvals` at `�
 flows of equal length.
 
 Returns `T[t, y, x]` on `rd.phys`. Other keywords go unchanged to both `solve_explicit`
-calls, so a `Pe` keyword overrides the Péclet number of both bases;
-`compute_Φky = true` is not supported.
+calls, so a `Pe` keyword overrides the Péclet number of both bases.
+
+`shifts`, if given, has one entry per segment (`cld(length(tvals), nΔt)` entries):
+segment `j` runs its flow shifted by `shifts[j]` along that flow's shear direction (y
+for the non-rotated flow, x for the rotated one), as the `shift` keyword of
+`solve_explicit`. Each entry is a real number in `[0, 2π]`, snapped to the nearest
+whole number of grid steps. The default, `nothing`, means no shift.
 """
 function renewing_flows(rd::RotatedDomain, basis::SpectralBasis, rdbasis::SpectralBasis,
         T0::Matrix{Float64}, tvals::AbstractRange, nΔt::Integer = 1;
+        shifts::Union{Nothing, AbstractVector{<:Real}} = nothing,
         show_progress::Bool = true, kwargs...)
     rd.L == 1 || throw(ArgumentError(
         "renewing_flows needs a square box (rd.L == 1); got rd.L = $(rd.L)"))
@@ -788,10 +853,16 @@ function renewing_flows(rd::RotatedDomain, basis::SpectralBasis, rdbasis::Spectr
         throw(ArgumentError("tvals must have a positive step; got $(step(tvals))"))
     get(kwargs, :compute_Φky, false) &&
         throw(ArgumentError("renewing_flows does not support compute_Φky = true"))
+    haskey(kwargs, :shift) && throw(ArgumentError(
+        "renewing_flows takes per-segment shifts through `shifts`, not `shift`"))
 
     nt = length(tvals)
     T = zeros(Float64, nt, length(dom.y), length(dom.x))
     starts = 1:nΔt:nt
+    shifts === nothing || length(shifts) == length(starts) ||
+        throw(DimensionMismatch(
+            "shifts must have one entry per segment, cld(length(tvals), nΔt) = " *
+            "$(length(starts)); got $(length(shifts))"))
 
     p = show_progress && !isempty(starts) ?
         Progress(length(starts); desc = "Computing renewing-flow solution") :
@@ -803,9 +874,12 @@ function renewing_flows(rd::RotatedDomain, basis::SpectralBasis, rdbasis::Spectr
         idx = i1:min(i1 + nΔt - 1, nt)
         τ = tvals[idx] .- t_r
         # odd segments: the non-rotated flow; even segments: the rotated flow
+        sj = shifts === nothing ? 0.0 : shifts[j]
         Tn = isodd(j) ?
-             solve_explicit(dom, basis, Tj, τ; show_progress = false, kwargs...) :
-             solve_explicit(rd, rdbasis, Tj, τ; show_progress = false, kwargs...)
+             solve_explicit(dom, basis, Tj, τ; shift = sj, show_progress = false,
+            kwargs...) :
+             solve_explicit(rd, rdbasis, Tj, τ; shift = sj, show_progress = false,
+            kwargs...)
         T[idx, :, :] .= Tn
         Tj = Tn[end, :, :]
         t_r = tvals[last(idx)]
