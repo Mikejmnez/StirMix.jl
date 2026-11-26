@@ -1222,4 +1222,26 @@ end
             @test maximum(abs.(T100 .- T200)) ≤ 1e-10
         end
     end
+
+    @testset "rot_domain: physical and solver frames (FR-011, rotation Phase 2)" begin
+        Nx, Ny = 24, 16
+        for L in (1, 2, 5)
+            rd = rot_domain(L, Nx, Ny)
+            @test rd isa StirMix.RotatedDomain
+            @test rd.L == L
+            # physical frame is the ordinary domain of aspect ratio L
+            @test rd.phys.x == domain(L, 1, Nx, Ny).x
+            @test rd.phys.y == domain(L, 1, Nx, Ny).y
+            # solver frame: aspect ratio 1/L, point counts swapped
+            @test rd.solver.L ≈ 1 / L
+            @test length(rd.solver.x) == Ny && length(rd.solver.y) == Nx
+            # the cell-centred grids map onto each other: x = L(y′ − π), y = L·x′ + π
+            @test isapprox(rd.solver.y .* L .- π * L, rd.phys.x; atol = 1e-12 * L)
+            @test isapprox(rd.solver.x .* L .+ π, rd.phys.y; atol = 1e-12)
+        end
+        @test rot_domain(2.0, Nx, Ny).L == 2
+        @test_throws ArgumentError rot_domain(2.5, Nx, Ny)
+        @test_throws ArgumentError rot_domain(0, Nx, Ny)
+        @test_throws ArgumentError rot_domain(-1, Nx, Ny)
+    end
 end

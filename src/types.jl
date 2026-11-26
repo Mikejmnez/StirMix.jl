@@ -9,6 +9,22 @@ struct Domain
     K::Vector{Float64}
 end
 
+"""
+    RotatedDomain
+
+A shear flow rotated by 90° (flow along y, shear in x) on a box of integer aspect ratio
+`L`, carried in two frames. Build it with [`rot_domain`](@ref).
+
+- `phys`: the physical frame, `domain(L, 1, Nx, Ny)`.
+- `solver`: the frame the solver runs in, `domain(1/L, 1, Ny, Nx)`.
+- `L`: the aspect ratio of `phys`.
+"""
+struct RotatedDomain
+    phys::Domain
+    solver::Domain
+    L::Int
+end
+
 struct SpectralBasis
     qs::Any
     β0::Float64
