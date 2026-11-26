@@ -1184,4 +1184,42 @@ end
         basis_lin = spectral_basis(:linear, Pe, dom, 10; show_progress = false)
         @test isapprox(2 * basis_tri.β0, basis_lin.β0; atol = 1e-10, rtol = 1e-1)
     end
+
+    @testset "aspect ratio ≤ 1 with rotated-flow potentials (FR-012, rotation Phase 1)" begin
+        # Solver frame of a rotated flow with integer aspect ratio L: domain(1/L, …),
+        # x-wavenumbers n·L, and the remapped :cos flow U(L(y − π) + π), whose first
+        # harmonic is at index L. 
+        remapped_cos(L, y) = @. (1 - (-1)^(L - 1) * cos(L * y)) / 2
+        for L in (1, 10)
+            dom = domain(1 / L, 1, 16, max(64, 4L))
+            x, y = dom.x, dom.y
+            Up = remapped_cos(L, y)
+
+            # (a) Pe = 0: analytic heat-equation solution
+            T0 = [cos(yy) + cos(L * xx) * cos(2yy) + sin(2L * xx) for yy in y, xx in x]
+            tv = [0.0, 0.1, 1.0] ./ L^2
+            function exact(t)
+                [exp(-t) * cos(yy) + exp(-t * (L^2 + 4)) * cos(L * xx) * cos(2yy) +
+                 exp(-4L^2 * t) * sin(2L * xx) for yy in y, xx in x]
+            end
+            basis0 = spectral_basis(Up, 0.0, dom, 60; show_progress = false,
+                compute_odd = true)
+            @test !basis0.even_extension
+            T = solve_explicit(dom, basis0, T0, tv; show_progress = false)
+            for i in eachindex(tv)
+                @test maximum(abs.(T[i, :, :] .- exact(tv[i]))) ≤ 1e-12
+            end
+
+            # (b) Pe' = Pe·L with Pe = 10: converged in the truncation cap Ns.
+            G0 = [exp(-(yy - π)^2 / 0.5) * (1 + 0.5cos(L * xx)) for yy in y, xx in x]
+            tb = [0.0, 0.01, 0.1, 1.0] ./ L^2
+            T100 = solve_explicit(dom,
+                spectral_basis(Up, 10.0 * L, dom, 100; show_progress = false),
+                G0, tb; show_progress = false)
+            T200 = solve_explicit(dom,
+                spectral_basis(Up, 10.0 * L, dom, 200; show_progress = false),
+                G0, tb; show_progress = false)
+            @test maximum(abs.(T100 .- T200)) ≤ 1e-10
+        end
+    end
 end
