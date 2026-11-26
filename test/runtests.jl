@@ -1245,20 +1245,24 @@ end
         @test_throws ArgumentError rot_domain(-1, Nx, Ny)
     end
 
-    @testset "spectral_basis on a RotatedDomain (FR-011, rotation Phase 3)" begin
+    @testset "spectral_basis on a RotatedDomain" begin
         Nx, Ny, Ns, Pe = 32, 16, 40, 10.0
         close_eigs(a, b) = all(k -> isapprox(a.an[k], b.an[k]; rtol = 1e-10, atol = 1e-10),
             eachindex(a.an))
 
-        # flows that need the even extension are rejected (FR-011)
+        # flows that need the even extension are rejected
         rd2 = rot_domain(2, Nx, Ny)
         @test_throws ArgumentError spectral_basis(
             :linear, Pe, rd2, Ns; show_progress = false)
-        ramp = rd2.phys.y ./ 2π   # odd about the channel centre
-        @test_throws ArgumentError spectral_basis(ramp, Pe, rd2, Ns; show_progress = false)
+
+        linear = rd2.phys.y ./ 2π
+        @test_throws ArgumentError spectral_basis(
+            linear, Pe, rd2, Ns; show_progress = false)
+
         # the unrotated flow is sampled on phys.y
         @test_throws DimensionMismatch spectral_basis(ones(Nx), Pe, rd2, Ns;
             show_progress = false)
+
         # grid too coarse for L periods of the flow
         @test_throws ArgumentError spectral_basis(:cos, Pe, rot_domain(20, Nx, Ny), Ns;
             show_progress = false)
@@ -1266,11 +1270,11 @@ end
         # L = 1: the rotation is the identity
         rd1 = rot_domain(1, Nx, Ny)
         b_rot = spectral_basis(:cos, Pe, rd1, Ns; show_progress = false)
-        b_dir = spectral_basis(:cos, Pe, rd1.solver, Ns; show_progress = false)
+        b_nonrot = spectral_basis(:cos, Pe, rd1.solver, Ns; show_progress = false)
         @test b_rot.Pe == Pe
-        @test b_rot.β0 ≈ b_dir.β0
-        @test ComplexF64.(b_rot.qs) ≈ ComplexF64.(b_dir.qs)   # qs has a Union eltype
-        @test close_eigs(b_rot, b_dir)
+        @test b_rot.β0 ≈ b_nonrot.β0
+        @test ComplexF64.(b_rot.qs) ≈ ComplexF64.(b_nonrot.qs)   # qs has a Union eltype
+        @test close_eigs(b_rot, b_nonrot)
 
         # L = 2: U′(y′) = U(2(y′ − π) + π), and β′[2] = (−1)^(1·1)·β[1] = 0.5
         U′, β0′, β′ = StirMix._rotated_flow(:cos, rd2)
@@ -1279,14 +1283,118 @@ end
         @test β′[2] ≈ 0.5
         @test count(!iszero, β′) == 1
 
-        # named and sampled :cos give the same rotated basis (FR-009); Pe′ = Pe·L
+        # named and sampled :cos give the same rotated basis; Pe′ = Pe·L
+        U = @.((1 - cos(rd2.phys.y))/2)
         b_named = spectral_basis(:cos, Pe, rd2, Ns; show_progress = false)
-        b_samp = spectral_basis(@.((1 - cos(rd2.phys.y))/2), Pe, rd2, Ns;
-            show_progress = false)
+        b_samp = spectral_basis(U, Pe, rd2, Ns; show_progress = false)
+
         @test b_named.Pe == 2Pe && b_samp.Pe == 2Pe
         @test !b_named.even_extension
         @test isapprox(b_named.β[2], 0.5; atol = 1e-13)
         @test isapprox(b_named.β, b_samp.β; atol = 1e-13)
         @test close_eigs(b_named, b_samp)
+    end
+
+    @testset "solve_explicit on a RotatedDomain" begin
+        Pe, Ns, Δt = 10.0, 60, 0.1
+        maxdiff(A, B) = maximum(abs.(A .- B))
+        # pure diffusion of a 1-D profile f on a periodic grid x of period P
+        function diffused(f, x, P, t)
+            a0, a, b = StirMix.normal_mode_decomposition(f, x; Lx = P)
+            k = 2π / P
+            return a0 / 2 .+ sum(exp(-(m * k)^2 * t) .*
+                       (a[m] .* cos.(m * k .* x) .+ b[m] .* sin.(m * k .* x))
+            for m in eachindex(a))
+        end
+
+        # --- mirror test on the square box (L = 1) --------------------------------
+        # The swap (x, y) -> (y − π, x + π) maps the box onto itself and the flow
+        # U(y) x̂ onto the rotated U(x + π) ŷ; on the cell-centred grids it is an
+        # array transpose.
+        N = 32
+        rd = rot_domain(1, N, N)
+        dom = rd.phys
+
+        # strip initial condition
+        g = @. exp(-dom.x^2 / 0.5)                       # strip profile
+        b_still = spectral_basis(:cos, 0.0, dom, Ns; show_progress = false)
+        b_flow = spectral_basis(:cos, Pe, dom, Ns; show_progress = false)
+        b_rot = spectral_basis(:cos, Pe, rd, Ns; show_progress = false)
+        # reference, unrotated solver only: g(x); Δt no flow, then Δt with U(y) x̂
+        R0 = repeat(transpose(g), length(dom.y), 1)
+        R1 = solve_explicit(dom, b_still, R0, [Δt]; show_progress = false)[1, :, :]
+        R2 = solve_explicit(dom, b_flow, R1, [Δt]; show_progress = false)[1, :, :]
+        # mirror: g(y − π); Δt with U(y) x̂ (inert on a field uniform in x), then Δt
+        # with the rotated flow
+        M0 = Matrix(transpose(R0))
+        M1 = solve_explicit(dom, b_flow, M0, [Δt]; show_progress = false)[1, :, :]
+        M2 = solve_explicit(rd, b_rot, M1, [Δt]; show_progress = false)[1, :, :]
+        # stage 1 is pure diffusion in both
+        @test maxdiff(R1[1, :], diffused(g, dom.x, 2π, Δt)) ≤ 1e-12
+        @test maxdiff(M1, transpose(R1)) ≤ 1e-12
+        # the rotated advection reproduces the unrotated one, transposed
+        R2_still = solve_explicit(dom, b_still, R0, [2Δt]; show_progress = false)[1, :, :]
+        @test maxdiff(R2, R2_still) > 1e-2    # the flow did act
+        @test maxdiff(M2, transpose(R2)) ≤ 1e-12
+
+        # --- L = 2 ----------------------------------------------------------------
+        L = 2
+        rd = rot_domain(L, 32, 16)
+        x, y = rd.phys.x, rd.phys.y
+        b2 = spectral_basis(:cos, Pe, rd, Ns; show_progress = false, compute_odd = true)
+        tv = [0.0, 0.05, 0.2]
+
+        # time scaling and grid map: a field varying only in x is not advected by
+        # v(x) ŷ and diffuses on the period 2πL
+        fx = @. cos(x / L) + 0.5cos(x)
+        T = solve_explicit(rd, b2, repeat(transpose(fx), length(y), 1), tv;
+            show_progress = false)
+        for (i, t) in enumerate(tv)
+            @test maxdiff(T[i, 1, :], diffused(fx, x, 2π * L, t)) ≤ 1e-12
+            @test maxdiff(T[i, :, :], repeat(T[i, 1:1, :], length(y), 1)) ≤ 1e-12
+        end
+
+        # implementation check: a hand-built unrotated run on domain(1/L, …) with the
+        # remapped flow, Pe·L, t/L² and the transposed initial condition
+        T0 = [exp(-(yy - 2.0)^2 / 0.3) * (1 + 0.5cos(xx / L)) for yy in y, xx in x]
+        T_rot = solve_explicit(rd, b2, T0, tv; show_progress = false)
+        dom′ = domain(1 / L, 1, length(y), length(x))
+        U′ = @. (1 - (-1)^(L - 1) * cos(L * dom′.y)) / 2
+        b′ = spectral_basis(U′, Pe * L, dom′, Ns; show_progress = false,
+            compute_odd = true)
+        T_hand = solve_explicit(dom′, b′, Matrix(transpose(T0)), tv ./ L^2;
+            show_progress = false)
+        @test maxdiff(T_rot, permutedims(T_hand, (1, 3, 2))) ≤ 1e-12
+
+        # profile/coefficient form equals the T0 form: fx(x)·f(y),
+        # f(y) = 1 + 0.5cos(y) + 0.3sin(2y)
+        fxp = @. exp(-x^2 / 2)
+        C = zeros(ComplexF64, length(rd.solver.K))
+        C[1], C[2], C[3] = 1.0, 0.5, -0.3im
+        fy = @. 1 + 0.5cos(y) + 0.3sin(2y)
+        T_coef = solve_explicit(rd, b2, fxp, C, tv; show_progress = false)
+        T_full = solve_explicit(rd, b2, fy * transpose(fxp), tv; show_progress = false)
+        @test maxdiff(T_coef, T_full) ≤ 1e-12
+
+        # sign: Pe < 0 is the Pe > 0 solution reflected in y (y -> 2π − y), and the
+        # flow carries the scalar along +y for Pe > 0
+        b2_neg = spectral_basis(:cos, -Pe, rd, Ns; show_progress = false,
+            compute_odd = true)
+        T_neg = solve_explicit(rd, b2_neg, T0, tv; show_progress = false)
+        T_refl = solve_explicit(rd, b2, reverse(T0; dims = 1), tv; show_progress = false)
+        @test maxdiff(T_neg, reverse(T_refl; dims = 2)) ≤ 1e-12
+        blob = [exp(-((yy - π)^2 + xx^2) / 0.3) for yy in y, xx in x]
+        ycentroid(F) = sum(F .* y) / sum(F)
+        T_pos = solve_explicit(rd, b2, blob, [0.0, 0.02]; show_progress = false)
+        T_negb = solve_explicit(rd, b2_neg, blob, [0.0, 0.02]; show_progress = false)
+        @test ycentroid(T_pos[2, :, :]) > ycentroid(T_pos[1, :, :]) + 0.05
+        @test ycentroid(T_negb[2, :, :]) < ycentroid(T_negb[1, :, :]) - 0.05
+
+        # guards
+        @test_throws ArgumentError solve_explicit(rd,
+            spectral_basis(:linear, Pe, dom′, Ns; show_progress = false), T0, tv;
+            show_progress = false)
+        @test_throws DimensionMismatch solve_explicit(rd, b2, Matrix(transpose(T0)), tv;
+            show_progress = false)
     end
 end
