@@ -752,6 +752,70 @@ function solve_explicit(rd::RotatedDomain, basis::SpectralBasis,
     return _rotated_to_phys(out)
 end
 
+"""
+    renewing_flows(rd::RotatedDomain, basis, rdbasis, T0::Matrix{Float64}, tvals, nΔt = 1;
+        show_progress = true, kwargs...)
+
+Evolve `T0` in a renewing flow on the square box `rd` (`rd.L == 1`) that alternates a
+shear flow with its 90° rotation. The non-rotated flow (`basis`, from
+`spectral_basis(flow, Pe, rd.phys, Ns)`) runs first for `nΔt` steps of `tvals`, then the
+rotated flow (`rdbasis`, from `spectral_basis(flow, Pe, rd, Ns)`) for the next `nΔt`
+steps, and so on until `tvals` runs out; the last segment may be shorter. Each segment
+starts from the last field of the one before.
+
+`T0` is the field at `t = 0`, of size `(length(rd.phys.y), length(rd.phys.x))`, and
+`tvals` is a range with a positive step. As in the `BasesIter` method, the flow
+switches at `tvals[j·nΔt]`: with `tvals = δt:δt:…` every flow lasts `nΔt·δt`, while
+with `tvals = 0:δt:…` the first flow lasts one step less. Start `tvals` at `δt` for
+flows of equal length.
+
+Returns `T[t, y, x]` on `rd.phys`. Other keywords go unchanged to both `solve_explicit`
+calls, so a `Pe` keyword overrides the Péclet number of both bases;
+`compute_Φky = true` is not supported.
+"""
+function renewing_flows(rd::RotatedDomain, basis::SpectralBasis, rdbasis::SpectralBasis,
+        T0::Matrix{Float64}, tvals::AbstractRange, nΔt::Integer = 1;
+        show_progress::Bool = true, kwargs...)
+    rd.L == 1 || throw(ArgumentError(
+        "renewing_flows needs a square box (rd.L == 1); got rd.L = $(rd.L)"))
+    _require_rotatable_basis(rdbasis)
+    dom = rd.phys
+    size(T0) == (length(dom.y), length(dom.x)) || throw(DimensionMismatch(
+        "T0 must be (length(rd.phys.y), length(rd.phys.x)) = " *
+        "$((length(dom.y), length(dom.x))); got $(size(T0))"))
+    nΔt ≥ 1 || throw(ArgumentError("nΔt must be ≥ 1; got $nΔt"))
+    step(tvals) > 0 ||
+        throw(ArgumentError("tvals must have a positive step; got $(step(tvals))"))
+    get(kwargs, :compute_Φky, false) &&
+        throw(ArgumentError("renewing_flows does not support compute_Φky = true"))
+
+    nt = length(tvals)
+    T = zeros(Float64, nt, length(dom.y), length(dom.x))
+    starts = 1:nΔt:nt
+
+    p = show_progress && !isempty(starts) ?
+        Progress(length(starts); desc = "Computing renewing-flow solution") :
+        nothing
+
+    t_r = 0.0     # time of the current segment's initial condition
+    Tj = T0
+    for (j, i1) in enumerate(starts)
+        idx = i1:min(i1 + nΔt - 1, nt)
+        τ = tvals[idx] .- t_r
+        # odd segments: the non-rotated flow; even segments: the rotated flow
+        Tn = isodd(j) ?
+             solve_explicit(dom, basis, Tj, τ; show_progress = false, kwargs...) :
+             solve_explicit(rd, rdbasis, Tj, τ; show_progress = false, kwargs...)
+        T[idx, :, :] .= Tn
+        Tj = Tn[end, :, :]
+        t_r = tvals[last(idx)]
+        p === nothing || next!(p)
+    end
+
+    p === nothing || finish!(p)
+    return T
+end
+
 function _avg_work_scratch(work)
     return [AvgModeWork(w.A0, w.λ, w.γproj, similar(w.e)) for w in work]
 end

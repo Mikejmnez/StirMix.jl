@@ -16,6 +16,7 @@ include("flow.jl")
 include("reconstruction.jl")
 
 export domain,
+       renewing_flows,
        rot_domain,
        spectral_basis,
        solve_explicit,
