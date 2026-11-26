@@ -693,8 +693,6 @@ function solve_explicit(dom::Domain, bases::BasesIter,
     return T
 end
 
-# --- rotated shear flow (FR-011): physical frame <-> solver frame of a RotatedDomain ---
-
 function _require_rotatable_basis(basis::SpectralBasis)
     basis.even_extension && throw(ArgumentError(
         "a rotated flow must be even about the channel center; this basis uses the " *

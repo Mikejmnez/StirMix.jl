@@ -1185,7 +1185,7 @@ end
         @test isapprox(2 * basis_tri.β0, basis_lin.β0; atol = 1e-10, rtol = 1e-1)
     end
 
-    @testset "aspect ratio ≤ 1 with rotated-flow potentials (FR-012, rotation Phase 1)" begin
+    @testset "aspect ratio ≤ 1 with rotated-flow" begin
         # Solver frame of a rotated flow with integer aspect ratio L: domain(1/L, …),
         # x-wavenumbers n·L, and the remapped :cos flow U(L(y − π) + π), whose first
         # harmonic is at index L. 
@@ -1320,10 +1320,12 @@ end
         b_still = spectral_basis(:cos, 0.0, dom, Ns; show_progress = false)
         b_flow = spectral_basis(:cos, Pe, dom, Ns; show_progress = false)
         b_rot = spectral_basis(:cos, Pe, rd, Ns; show_progress = false)
+
         # reference, unrotated solver only: g(x); Δt no flow, then Δt with U(y) x̂
         R0 = repeat(transpose(g), length(dom.y), 1)
         R1 = solve_explicit(dom, b_still, R0, [Δt]; show_progress = false)[1, :, :]
         R2 = solve_explicit(dom, b_flow, R1, [Δt]; show_progress = false)[1, :, :]
+
         # mirror: g(y − π); Δt with U(y) x̂ (inert on a field uniform in x), then Δt
         # with the rotated flow
         M0 = Matrix(transpose(R0))
