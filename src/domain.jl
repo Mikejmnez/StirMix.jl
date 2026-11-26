@@ -36,6 +36,34 @@ function domain(L::Real, M::Integer, Nx::Integer, Ny::Integer)
 end
 
 """
+    rot_domain(L, Nx, Ny) -> RotatedDomain
+
+Domain for a shear flow rotated by 90°: the flow is along y (+y for Pe > 0) and varies
+in x, on the doubly periodic box `x ∈ [−πL, πL]`, `y ∈ [0, 2π]` of aspect ratio `L`.
+`L` must be a positive integer, so that the rotated flow keeps its physical
+wavelength and stays periodic and even in x.
+
+The solver runs on the rotated and rescaled frame (primes), where the cross-stream
+direction is normalised to period 2π (lengths scale by `1/L`):
+
+- `y′ = x/L + π` (cross-stream) and `x′ = (y − π)/L` (along-stream, period `2π/L`),
+  so the solver domain is `domain(1/L, 1, Ny, Nx)`, aspect ratio `1/L`, with the
+  point counts swapped.
+- The cell-centred grids map exactly: `phys.x = L·(solver.y − π)` and
+  `phys.y = L·solver.x + π`. A physical field `T(y, x)` is the solver field
+  `T′(y′, x′)` with its two axes swapped.
+- `Pe′ = Pe·L` and `t′ = t/L²`.
+
+Fields: `phys = domain(L, 1, Nx, Ny)`, `solver = domain(1/L, 1, Ny, Nx)`, `L`.
+"""
+function rot_domain(L::Real, Nx::Integer, Ny::Integer)
+    (isinteger(L) && L > 0) ||
+        throw(ArgumentError("rot_domain needs a positive integer aspect ratio L; got L = $L"))
+    Li = Int(L)
+    return RotatedDomain(domain(Li, 1, Nx, Ny), domain(1 / Li, 1, Ny, Nx), Li)
+end
+
+"""
     _ytilde(dom) -> ỹ
 
 The cross-stream grid in the Hill-equation variable `ỹ = dom.y / 2 ∈ (0, π)`, used by
