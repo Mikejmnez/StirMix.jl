@@ -1,4 +1,4 @@
-const _SPECTRAL_DATA_SCHEMA_VERSION = 1
+const _SPECTRAL_DATA_SCHEMA_VERSION = 2
 
 # Meaning of `domain_L` in a saved basis.
 const _X_PERIOD_CONVENTION = "aspect_ratio"
@@ -326,6 +326,11 @@ function _read_spectral_data(path::AbstractString)
             "spectral data in $path was written with an x period of L, before L " *
             "became the aspect ratio (x period 2πL); recompute it with " *
             "spectral_io = :write"))
+        schema = Int(_require_spectral_key(f, "meta/schema_version"))
+        schema ≥ _SPECTRAL_DATA_SCHEMA_VERSION || throw(ArgumentError(
+            "spectral data in $path has schema version $schema, written before the " *
+            "even-extension scaling fix (schema $(_SPECTRAL_DATA_SCHEMA_VERSION)); " *
+            "recompute it with spectral_io = :write"))
         nk = Int(_require_spectral_key(f, "data/nk"))
         has_odd = Bool(_require_spectral_key(f, "data/has_odd"))
 
