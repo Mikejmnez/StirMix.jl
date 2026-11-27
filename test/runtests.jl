@@ -1,5 +1,6 @@
 using StirMix
 using JLD2
+using Random
 using Test
 
 struct ProgressTestTimes{T}
@@ -1525,11 +1526,11 @@ end
         # renewing_flows: zero shifts are unchanged; given shifts equal hand chaining
         n = 2
         tvr = range(0.02; step = 0.02, length = 4n)
-        T_none = StirMix.renewing_flows(rd, b, b_rot, T0, tvr, n; show_progress = false)
-        @test StirMix.renewing_flows(rd, b, b_rot, T0, tvr, n; shifts = zeros(4),
+        T_none = renewing_flows(rd, b, b_rot, T0, tvr, n; show_progress = false)
+        @test renewing_flows(rd, b, b_rot, T0, tvr, n; shifts = zeros(4),
             show_progress = false) == T_none
         shifts = [π / 2, π / 3, 1.0, 5.0]
-        T = StirMix.renewing_flows(rd, b, b_rot, T0, tvr, n; shifts = shifts,
+        T = renewing_flows(rd, b, b_rot, T0, tvr, n; shifts = shifts,
             show_progress = false)
         F = T0
         t_r = 0.0
@@ -1541,7 +1542,26 @@ end
             t_r = tvr[last(idx)]
         end
 
-        # guards
+        # shifts = :rand: a fresh shift per segment, drawn from `rng`
+        tv8 = range(0.02; step = 0.02, length = 8)
+        rf(; kw...) = renewing_flows(rd, b, b_rot, T0, tv8, 1;
+            show_progress = false, kw...)
+        r = Xoshiro(7)
+        drawn = [2π * rand(r) for _ in 1:8]
+        T8_r = rf(; shifts = :rand, rng = Xoshiro(7))
+        @test T8_r == rf(; shifts = drawn)            # the shifts can be regenerated
+        @test T8_r != rf()                            # and they do shift the flow
+        @test rf(; shifts = :rand, rng = Xoshiro(8)) != T8_r
+        # without rng, the global generator: reproducible with Random.seed!
+        Random.seed!(11)
+        T8_g1 = rf(; shifts = :rand)
+        Random.seed!(11)
+        @test rf(; shifts = :rand) == T8_g1
+        @test_throws ArgumentError rf(; shifts = drawn, rng = Xoshiro(7))
+        @test_throws ArgumentError renewing_flows(rd, b, b_rot, T0, tv8, 1;
+            shifts = :random, show_progress = false)
+
+        # Tesst for invalid shifts: <0 or >2π
         @test_throws ArgumentError solve(dom, b, T0, tv; shift = -0.1)
         @test_throws ArgumentError solve(dom, b, T0, tv; shift = 2π + 0.1)
         @test_throws ArgumentError solve(rd, b_rot, T0, tv; shift = 2π + 0.1)
@@ -1554,9 +1574,9 @@ end
         @test b_ext.even_extension
         @test_throws ArgumentError solve(dom, b_ext, T0, tv; shift = π)
         @test size(solve(dom, b_ext, T0, tv; shift = 0.0)) == (2, N, N)
-        @test_throws DimensionMismatch StirMix.renewing_flows(rd, b, b_rot, T0, tvr, n;
+        @test_throws DimensionMismatch renewing_flows(rd, b, b_rot, T0, tvr, n;
             shifts = zeros(3), show_progress = false)
-        @test_throws ArgumentError StirMix.renewing_flows(rd, b, b_rot, T0, tvr, n;
+        @test_throws ArgumentError renewing_flows(rd, b, b_rot, T0, tvr, n;
             shift = 1.0, show_progress = false)
     end
 end

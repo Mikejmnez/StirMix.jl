@@ -16,10 +16,12 @@ HillFunctions = "0.1.0"
 JLD2 = "0.6"
 LinearAlgebra = "1.10.0"
 ProgressMeter = "1.11.0"
+Random = "1.10.0"
 julia = "1.10"
 
 [extras]
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["Random", "Test"]

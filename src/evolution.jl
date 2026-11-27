@@ -813,7 +813,7 @@ end
 
 """
     renewing_flows(rd::RotatedDomain, basis, rdbasis, T0::Matrix{Float64}, tvals, nΔt = 1;
-        shifts = nothing, show_progress = true, kwargs...)
+        shifts = nothing, rng = nothing, show_progress = true, kwargs...)
 
 Evolve `T0` in a renewing flow on the square box `rd` (`rd.L == 1`) that alternates a
 shear flow with its 90° rotation. The non-rotated flow (`basis`, from
@@ -836,10 +836,19 @@ segment `j` runs its flow shifted by `shifts[j]` along that flow's shear directi
 for the non-rotated flow, x for the rotated one), as the `shift` keyword of
 `solve_explicit`. Each entry is a real number in `[0, 2π]`, snapped to the nearest
 whole number of grid steps. The default, `nothing`, means no shift.
+
+`shifts = :rand` draws a new shift for every segment, uniformly in `[0, 2π)`: segment
+`j` uses the `j`-th value of `2π * rand(rng)`, or of `2π * rand()` (the global random
+number generator) when `rng` is not given. After snapping, every whole number of grid
+steps is equally likely. The drawn shifts are not returned, but they can be
+regenerated: with `rng = Xoshiro(seed)`,
+`r = Xoshiro(seed); [2π * rand(r) for _ in 1:cld(length(tvals), nΔt)]` gives the same
+values. `rng` may only be passed together with `shifts = :rand`.
 """
 function renewing_flows(rd::RotatedDomain, basis::SpectralBasis, rdbasis::SpectralBasis,
         T0::Matrix{Float64}, tvals::AbstractRange, nΔt::Integer = 1;
-        shifts::Union{Nothing, AbstractVector{<:Real}} = nothing,
+        shifts::Union{Nothing, Symbol, AbstractVector{<:Real}} = nothing,
+        rng = nothing,
         show_progress::Bool = true, kwargs...)
     rd.L == 1 || throw(ArgumentError(
         "renewing_flows needs a square box (rd.L == 1); got rd.L = $(rd.L)"))
@@ -859,7 +868,12 @@ function renewing_flows(rd::RotatedDomain, basis::SpectralBasis, rdbasis::Spectr
     nt = length(tvals)
     T = zeros(Float64, nt, length(dom.y), length(dom.x))
     starts = 1:nΔt:nt
-    shifts === nothing || length(shifts) == length(starts) ||
+    shifts isa Symbol && shifts !== :rand &&
+        throw(ArgumentError(
+            "shifts must be nothing, :rand or a vector of shifts; got $(repr(shifts))"))
+    rng === nothing || shifts === :rand ||
+        throw(ArgumentError("rng is only used with shifts = :rand"))
+    shifts isa AbstractVector && length(shifts) != length(starts) &&
         throw(DimensionMismatch(
             "shifts must have one entry per segment, cld(length(tvals), nΔt) = " *
             "$(length(starts)); got $(length(shifts))"))
@@ -874,7 +888,8 @@ function renewing_flows(rd::RotatedDomain, basis::SpectralBasis, rdbasis::Spectr
         idx = i1:min(i1 + nΔt - 1, nt)
         τ = tvals[idx] .- t_r
         # odd segments: the non-rotated flow; even segments: the rotated flow
-        sj = shifts === nothing ? 0.0 : shifts[j]
+        sj = shifts === nothing ? 0.0 :
+             shifts === :rand ? 2π * (rng === nothing ? rand() : rand(rng)) : shifts[j]
         Tn = isodd(j) ?
              solve_explicit(dom, basis, Tj, τ; shift = sj, show_progress = false,
             kwargs...) :
