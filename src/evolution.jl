@@ -44,10 +44,11 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
         βshift = im * (Float64(β0) / 2) * Kk * Float64(Pe)
     end
 
+    fy = 1 / _y_extension_scale(basis.even_extension)
     λ = ComplexF64.(basis.an[k])
     conj_spectrum && conj!(λ)
 
-    @. λ = λ / 4 + Kk^2 + βshift
+    @. λ = fy * λ / 4 + Kk^2 + βshift
 
     Nuse = min(R, length(γ))
     γlow = @view γ[1:Nuse]
@@ -85,7 +86,7 @@ function _prepare_coefficient_mode_work_point(dom, basis, γ, γ_o, Pe, k, β0)
         R_o, Nno = size(Bk)
 
         λ_o = ComplexF64.(basis.bn[k])
-        @. λ_o = λ_o / 4 + Kk^2 + βshift
+        @. λ_o = fy * λ_o / 4 + Kk^2 + βshift
 
         Nuse_o = min(R_o, length(γ_o))
         γlow_o = @view γ_o[1:Nuse_o]
@@ -202,7 +203,7 @@ function _fetch_all_tasks(tasks)
 end
 
 function prepare_mode_data_avg(dom::Domain, Ak::Vector{Any}, avals::Vector{Any},
-        γ::Vector{Float64}, β0::Union{Nothing, Real}, Pe::Real)
+        γ::Vector{Float64}, β0::Union{Nothing, Real}, Pe::Real, fy::Real = 1.0)
     conj_spectrum = Pe < 0
     nk = length(dom.K)
     work = Vector{AvgModeWork}(undef, nk)
@@ -232,7 +233,7 @@ function prepare_mode_data_avg(dom::Domain, Ak::Vector{Any}, avals::Vector{Any},
 
         mul!(γproj, transpose(view(Akk, 1:Nγ, :)), view(γ, 1:Nγ))
 
-        @. λ = ank / 4 + Kk^2 + βshift * Kk
+        @. λ = fy * ank / 4 + Kk^2 + βshift * Kk
 
         work[k] = AvgModeWork(A0, λ, γproj, e)
     end
@@ -241,7 +242,7 @@ function prepare_mode_data_avg(dom::Domain, Ak::Vector{Any}, avals::Vector{Any},
 end
 
 function prepare_mode_data_avg(dom::Domain, Ak::Vector{Any}, avals::Vector{Any},
-        γ::Matrix{ComplexF64}, β0::Union{Nothing, Real}, Pe::Real)
+        γ::Matrix{ComplexF64}, β0::Union{Nothing, Real}, Pe::Real, fy::Real = 1.0)
     conj_spectrum = Pe < 0
     nk = length(dom.K)
     work = Vector{AvgModeWork}(undef, nk)
@@ -271,7 +272,7 @@ function prepare_mode_data_avg(dom::Domain, Ak::Vector{Any}, avals::Vector{Any},
 
         mul!(γproj, transpose(view(Akk, 1:Nγ, :)), view(γ, 1:Nγ, k))
 
-        @. λ = ank / 4 + Kk^2 + βshift * Kk
+        @. λ = fy * ank / 4 + Kk^2 + βshift * Kk
 
         work[k] = AvgModeWork(A0, λ, γproj, e)
     end
@@ -279,36 +280,36 @@ function prepare_mode_data_avg(dom::Domain, Ak::Vector{Any}, avals::Vector{Any},
     return work
 end
 
-function _add_tail!(f, tail, t, Kk, fac)
+function _add_tail!(f, tail, t, Kk, fy)
     m_tail, Atail, γtail, tmp = tail
     isempty(m_tail) && return nothing
 
     k2 = Kk^2
     @inbounds for j in eachindex(m_tail)
-        tmp[j] = γtail[j] * exp(-Float64(t) * (fac * Float64(m_tail[j])^2 + k2))
+        tmp[j] = γtail[j] * exp(-Float64(t) * (fy * Float64(m_tail[j])^2 + k2))
     end
     mul!(f, Atail, tmp, one(eltype(f)), one(eltype(f)))
 
     return nothing
 end
 
-function _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0, nx, ny, fac, t64, k;
+function _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0, nx, ny, fy, t64, k;
         spectrum_star = nothing)
     wk = work[k]
     Kk = 2π * dom.K[k]
 
-    @. wk.e = exp(-t64 * fac * wk.λ)
+    @. wk.e = exp(-t64 * wk.λ)
     @. wk.modal = wk.projection * wk.e
     mul!(wk.coeff_y, wk.Ak, wk.modal)
     mul!(wk.f, wk.By, wk.coeff_y)
-    _add_tail!(wk.f, wk.tail, t64, Kk, fac)
+    _add_tail!(wk.f, wk.tail, t64, Kk, fy)
 
     if wk.projection_o !== nothing
-        @. wk.e_o = exp(-t64 * fac * wk.λ_o)
+        @. wk.e_o = exp(-t64 * wk.λ_o)
         @. wk.modal_o = wk.projection_o * wk.e_o
         mul!(wk.coeff_y_o, wk.Bk, wk.modal_o)
         mul!(wk.f_o, wk.By_o, wk.coeff_y_o)
-        _add_tail!(wk.f_o, wk.tail_o, t64, Kk, fac)
+        _add_tail!(wk.f_o, wk.tail_o, t64, Kk, fy)
     end
 
     phase0 = Ccoeffs[k] * cis(Kk * x0)
@@ -365,7 +366,7 @@ function _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0, nx, ny, fac, t6
 end
 
 function _solve_explicit_time!(T, it, t, spectrum, field, xplan, work,
-        dom, Ccoeffs, x0, nx, ny, nk, fac;
+        dom, Ccoeffs, x0, nx, ny, nk, fy;
         parallel::Bool = false,
         modal_k::Union{Nothing, Int} = nothing,
         spectrum_star = nothing)
@@ -376,18 +377,18 @@ function _solve_explicit_time!(T, it, t, spectrum, field, xplan, work,
 
     if modal_k !== nothing
         _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0,
-            nx, ny, fac, t64, modal_k;
+            nx, ny, fy, t64, modal_k;
             spectrum_star = spectrum_star)
     elseif parallel && Threads.nthreads() > 1 && nk > 1
         Threads.@threads :dynamic for k in 1:nk
             _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0,
-                nx, ny, fac, t64, k;
+                nx, ny, fy, t64, k;
                 spectrum_star = spectrum_star)
         end
     else
         for k in 1:nk
             _solve_explicit_mode!(spectrum, work, dom, Ccoeffs, x0,
-                nx, ny, fac, t64, k;
+                nx, ny, fy, t64, k;
                 spectrum_star = spectrum_star)
         end
     end
@@ -409,13 +410,12 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
         parallel::Bool = true,
         modal::Bool = false)
     γ, γ_o = y_modes(fy, dom; extend = basis.even_extension)
+    fy = 1 / _y_extension_scale(basis.even_extension)
     if basis.even_extension
-        fac = 0.5
         ny = 2 * length(dom.y)
         # same aspect ratio, doubled y grid; dom.L, not the grid period
         _dom = domain(dom.L, dom.M, length(dom.x), ny)
     else
-        fac = 1.0
         ny = length(dom.y)
         _dom = dom
     end
@@ -464,7 +464,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{Float64},
         for (it, t) in enumerate(tvals)
             _solve_explicit_time!(T, it, t, spectrum, field, xplan,
                 work, _dom, Ccoeffs, x0,
-                nx, ny, nk, fac;
+                nx, ny, nk, fy;
                 parallel = parallel && !modal,
                 modal_k = ik)
             advance_progress === nothing || advance_progress()
@@ -493,13 +493,12 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64
         modal::Bool = false,
         compute_Φky::Bool = false)
     γ, γ_o = y_modes(fy, dom; extend = basis.even_extension)
+    fy = 1 / _y_extension_scale(basis.even_extension)
     if basis.even_extension
-        fac = 0.5
         ny = 2 * length(dom.y)
         # same aspect ratio, doubled y grid; dom.L, not the grid period 
         _dom = domain(dom.L, dom.M, length(dom.x), ny)
     else
-        fac = 1.0
         ny = length(dom.y)
         _dom = dom
     end
@@ -549,7 +548,7 @@ function solve_explicit(dom::Domain, basis::SpectralBasis, fy::Vector{ComplexF64
         for (it, t) in enumerate(tvals)
             _solve_explicit_time!(T, it, t, spectrum, field, xplan,
                 work, _dom, Ccoeffs, x0,
-                nx, ny, nk, fac;
+                nx, ny, nk, fy;
                 parallel = parallel && !modal,
                 modal_k = ik,
                 spectrum_star = spectrum_star)
@@ -637,13 +636,12 @@ function _solve_explicit_T0(dom::Domain, basis::SpectralBasis,
     c0_2D, ce_2D, co_2D = normal_mode_decomposition(T0, dom.x; Lx = x_period, dim = 2)
     Ces = hcat(c0_2D ./ 2, complex_x_coeffs(ce_2D, co_2D))
     γ, γ_o = y_modes(Ces, dom; extend = basis.even_extension)
+    fy = 1 / _y_extension_scale(basis.even_extension)
     if basis.even_extension
-        fac = 0.5
         ny = 2 * length(dom.y)
         # same aspect ratio, doubled y grid; dom.L, not the grid period
         _dom = domain(dom.L, dom.M, length(dom.x), ny)
     else
-        fac = 1.0
         ny = length(dom.y)
         _dom = dom
     end
@@ -693,7 +691,7 @@ function _solve_explicit_T0(dom::Domain, basis::SpectralBasis,
         for (it, t) in enumerate(tvals)
             _solve_explicit_time!(T, it, t, spectrum, field, xplan,
                 work, _dom, Ccoeffs, x0,
-                nx, ny, nk, fac;
+                nx, ny, nk, fy;
                 parallel = parallel,
                 spectrum_star = spectrum_star)
             advance_progress === nothing || advance_progress()
@@ -909,7 +907,7 @@ function _avg_work_scratch(work)
     return [AvgModeWork(w.A0, w.λ, w.γproj, similar(w.e)) for w in work]
 end
 
-function _evolve_explicit_avg_time!(T, it, t, spec, work, dom, Ccoeffs, x0, nx, fac)
+function _evolve_explicit_avg_time!(T, it, t, spec, work, dom, Ccoeffs, x0, nx)
     fill!(spec, 0)
 
     # it is missing the tail - initial condition that decay are pure normal mode
@@ -918,7 +916,7 @@ function _evolve_explicit_avg_time!(T, it, t, spec, work, dom, Ccoeffs, x0, nx, 
     for k in eachindex(dom.K)
         wk = work[k]
 
-        @. wk.e = exp(-t * fac * wk.λ)
+        @. wk.e = exp(-t * wk.λ)
 
         # Modal averages may use high precision;
         # FFTW reconstruction is intentionally Float64.
@@ -949,7 +947,7 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis,
         parallel::Bool = true)
     # the averaged path uses only the cosine (even) modes
     γ, _ = y_modes(fy, dom; extend = basis.even_extension)
-    fac = basis.even_extension ? 0.5 : 1.0
+    fy = 1 / _y_extension_scale(basis.even_extension)
 
     nt = length(tvals)
     nx = length(dom.x)
@@ -961,7 +959,7 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis,
 
     _Pe = something(Pe, basis.Pe)
     _β0 = something(β0, basis.β0)
-    work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, _β0, _Pe)
+    work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, _β0, _Pe, fy)
 
     # define progressmeter instance
     p = show_progress && nt > 0 ?
@@ -1005,7 +1003,7 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis,
 
                     for it in chunk
                         _evolve_explicit_avg_time!(T, it, tbuf[it], local_spec,
-                            local_work, dom, Ccoeffs, x0, nx, fac)
+                            local_work, dom, Ccoeffs, x0, nx)
                         advance_progress === nothing || advance_progress()
                     end
                 end
@@ -1015,7 +1013,7 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis,
         else
             for (it, t) in enumerate(tvals)
                 _evolve_explicit_avg_time!(T, it, t, spec, work, dom,
-                    Ccoeffs, x0, nx, fac)
+                    Ccoeffs, x0, nx)
                 advance_progress === nothing || advance_progress()
             end
         end
@@ -1041,7 +1039,7 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis,
         Pe::Union{Nothing, Real} = nothing)
     # the averaged path uses only the cosine (even) modes
     γ, _ = y_modes(fy, dom; extend = basis.even_extension)
-    fac = basis.even_extension ? 0.5 : 1.0
+    fy = 1 / _y_extension_scale(basis.even_extension)
 
     nt = length(tvals)
     nx = length(dom.x)
@@ -1053,11 +1051,11 @@ function evolve_explicit_avg(dom::Domain, basis::SpectralBasis,
 
     _Pe = something(Pe, basis.Pe)
     _β0 = something(β0, basis.β0)
-    work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, _β0, _Pe)
+    work = prepare_mode_data_avg(dom, basis.Ak, basis.an, γ, _β0, _Pe, fy)
 
     for (it, t) in enumerate(tvals)
         _evolve_explicit_avg_time!(T, it, t, spec, work, dom,
-            Ccoeffs, x0, nx, fac)
+            Ccoeffs, x0, nx)
     end
 
     return T

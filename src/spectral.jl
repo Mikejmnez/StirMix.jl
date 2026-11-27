@@ -137,10 +137,6 @@ function complex_x_coeffs(ce::AbstractMatrix, co::AbstractMatrix)
     return complex.(ce, .-co)
 end
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Internal helper
-# ──────────────────────────────────────────────────────────────────────────────
-
 """Advance and wrap phi_old to [0, 2π]."""
 function _update_phi_old(phi_old::Real, phi_new::Real)
     phi_old = phi_old + phi_new
@@ -200,10 +196,6 @@ function coeff_project(
 
     return e_coeffs, o_coeffs, phi_new, phi_old
 end
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 2-D method  (y along dimension 1, x along dimension 2)
-# ──────────────────────────────────────────────────────────────────────────────
 
 """
     coeff_project(phi, y; phi_old=π, phi_new=0.0)
@@ -511,7 +503,7 @@ function _collect_spectral_data(domain::Domain, Pe::Real, Ns, β;
         even_extension::Bool = false)
     sweep_chunk_size = _normalize_sweep_chunk_size(sweep_chunk_size)
 
-    fac = even_extension ? 2 : 1.0
+    fac = _y_extension_scale(even_extension)
 
     nk = length(domain.K)
     qs = Vector{Union{ComplexF64, Complex{BigFloat}}}(undef, nk)
@@ -625,9 +617,6 @@ function spectral_basis(U::AbstractVector, Pe, domain::Domain, Ns;
     spectral_mode === :read && return _read_spectral_data(spectral_path)
 
     _, β0, β, even_extension = flow_decomposition(U, domain)
-    if even_extension
-        β0 *= 2
-    end
     data = _collect_spectral_data(domain, abs(Pe), Ns, β;
         precision_policy = precision_policy, qc0 = qc0, qc = qc,
         parallel = parallel,
@@ -686,7 +675,6 @@ function spectral_basis(
     _, β0, β, even_extension = flow_decomposition(flow, domain)
     if even_extension
         compute_odd = true
-        β0 *= 2
     end
 
     data = _collect_spectral_data(domain, abs(Pe), Ns, β;

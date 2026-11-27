@@ -1009,7 +1009,9 @@ end
         ft = sin.(10π .* tvals)
 
         bases = identical_bases_iter(:cos, dom, Pe, ft, 100; nt = 1)
-        bases_lin = identical_bases_iter(:linear, dom, Pe, ft, 100; nt = 1)
+        # :linear needs the even extension, where q is 4× that of an even flow
+        # (BUG-005): Pe = 25 keeps |q| ≤ 1000, as Pe = 100 does for :cos
+        bases_lin = identical_bases_iter(:linear, dom, 25, ft, 100; nt = 1)
 
         T_iter = solve_explicit(dom, bases, Z, tvals; show_progress = false)
         T_cont = solve_explicit(dom, bases.basis[1], Z, tvals; show_progress = false)
@@ -1178,12 +1180,15 @@ end
         end
     end
 
-    @testset " odd flows twice arithmetic mean" begin
+    @testset "odd and even flows keep their own arithmetic mean" begin
+        # BUG-005: :linear and :triangular both have mean ½ (β0 = 1); the basis no
+        # longer doubles β0 for the even extension
         Pe = 10
         dom = domain(1, 1, 10, 10)
         basis_tri = spectral_basis(:triangular, Pe, dom, 10; show_progress = false)
         basis_lin = spectral_basis(:linear, Pe, dom, 10; show_progress = false)
-        @test isapprox(2 * basis_tri.β0, basis_lin.β0; atol = 1e-10, rtol = 1e-1)
+        @test basis_lin.even_extension && !basis_tri.even_extension
+        @test basis_lin.β0 == basis_tri.β0 == 1.0
     end
 
     @testset "aspect ratio ≤ 1 with rotated-flow" begin
@@ -1578,5 +1583,104 @@ end
             shifts = zeros(3), show_progress = false)
         @test_throws ArgumentError renewing_flows(rd, b, b_rot, T0, tvr, n;
             shift = 1.0, show_progress = false)
+    end
+
+    @testset "even extension scaling (BUG-005)" begin
+        N, Ns = 32, 40
+        maxdiff(A, B) = maximum(abs.(A .- B))
+        dom1 = domain(1, 1, N, N)
+        rate(T, t) = -log(maximum(abs.(T[2, :, :])) / maximum(abs.(T[1, :, :]))) / t
+
+        # Pe = 0 decay rates for :linear on y ∈ [0, 2π] with walls: cos(x) at 1,
+        # cos(y) at 1, cos(y/2) at 1/4
+        bl0 = spectral_basis(:linear, 0.0, dom1, Ns; show_progress = false,
+            compute_odd = true)
+        for (g, r) in (((y, x) -> cos(x), 1.0), ((y, x) -> cos(y), 1.0),
+            ((y, x) -> cos(y / 2), 0.25))
+            T0 = [g(y, x) for y in dom1.y, x in dom1.x]
+            T = solve_explicit(dom1, bl0, T0, [0.0, 0.1]; show_progress = false)
+            @test rate(T, 0.1)≈r atol=1e-10
+        end
+        # averaged path, x-mode: fy = 1, f(x) = cos(x)
+        C = zeros(ComplexF64, length(dom1.K))
+        C[2] = 1.0
+        Tavg = evolve_explicit_avg(dom1, bl0, ones(N), C, [0.0, 0.1];
+            show_progress = false)
+        @test -log(maximum(abs.(Tavg[2, :])) / maximum(abs.(Tavg[1, :]))) / 0.1≈1.0 atol=1e-10
+
+        # :linear equals the mapped :triangular problem (Pe = 0). With η = y/2,
+        # x′ = x/2 and t′ = t/4, the extended :linear problem is the periodic
+        # triangular one on domain(1/2, 1, N, 2N); built with :linear's own β so
+        # both sides use the same truncated flow
+        dom2 = domain(0.5, 1, N, 2N)
+        _, β0l, βl, _ = StirMix.predefined_flow(:linear, dom1)
+        d = StirMix._collect_spectral_data(dom2, 0.0, Ns, βl; compute_odd = true,
+            show_progress = false)
+        bt = StirMix.SpectralBasis(d.qs, Float64(β0l), βl, d.an, d.bn, d.Ak, d.Bk,
+            0.0, false)
+        T0l = [(cos(y / 2) + 0.5cos(y)) * (1 + 0.5cos(x)) for y in dom1.y, x in dom1.x]
+        T0t = [(cos(η) + 0.5cos(2η)) * (1 + 0.5cos(2xp)) for η in dom2.y, xp in dom2.x]
+        exact(y, x, t) = (exp(-t / 4) * cos(y / 2) + 0.5exp(-t) * cos(y)) *
+                         (1 + 0.5exp(-t) * cos(x))
+        tv = [0.05, 0.1, 0.2]
+        Tl = solve_explicit(dom1, bl0, T0l, tv; show_progress = false)
+        Tt = solve_explicit(dom2, bt, T0t, tv ./ 4; show_progress = false)
+        for i in eachindex(tv)
+            @test maxdiff(Tl[i, :, :], Tt[i, 1:N, :]) ≤ 1e-12
+            @test maxdiff(Tl[i, :, :], [exact(y, x, tv[i]) for y in dom1.y, x in dom1.x]) ≤
+                  1e-12
+        end
+        # averaged path against the y-mean of the mapped triangular solution
+        Cl = zeros(ComplexF64, length(dom1.K))
+        Cl[1], Cl[2] = 1.0, 0.5
+        Tla = evolve_explicit_avg(dom1, bl0, cos.(dom1.y ./ 2) .+ 0.5cos.(dom1.y), Cl, tv;
+            show_progress = false)
+        for i in eachindex(tv)
+            @test maxdiff(Tla[i, :], vec(sum(Tt[i, 1:N, :]; dims = 1)) ./ N) ≤ 1e-12
+        end
+
+        # forced extension equals direct: :cos pushed through the extension path
+        # (β at index 2 on the doubled domain) matches the direct :cos solve, for
+        # initial conditions even about the walls, at Pe = 0. At Pe ≠ 0 the default
+        # eigensolve under-resolves the forced flow (harmonic index 2), a HillFunctions
+        # truncation issue; see dev/notebooks/forced_extension_test.ipynb
+        βc = zeros(N ÷ 2)
+        βc[2] = -0.5
+        T0s = ([cos(y) * (1 + 0.5cos(x)) for y in dom1.y, x in dom1.x],
+            [exp(-(y - π)^2 / 0.5) * (1 + 0.5cos(x)) for y in dom1.y, x in dom1.x])
+        gπ = exp.(-(dom1.y .- π) .^ 2 ./ 0.5)
+        for Pe in (0.0,)
+            de = StirMix._collect_spectral_data(dom1, abs(Pe), Ns, βc;
+                even_extension = true, compute_odd = true, show_progress = false)
+            b_ext = StirMix.SpectralBasis(de.qs, 1.0, βc, de.an, de.bn, de.Ak, de.Bk,
+                Pe, true)
+            b_dir = spectral_basis(:cos, Pe, dom1, Ns; show_progress = false,
+                compute_odd = true)
+            for T0 in T0s
+                @test maxdiff(solve_explicit(dom1, b_ext, T0, tv; show_progress = false),
+                    solve_explicit(dom1, b_dir, T0, tv; show_progress = false)) ≤ 1e-12
+            end
+            @test maxdiff(
+                evolve_explicit_avg(dom1, b_ext, gπ, Cl, tv;
+                    show_progress = false),
+                evolve_explicit_avg(dom1, b_dir, gπ, Cl, tv; show_progress = false)) ≤
+                  1e-12
+        end
+
+        # saved bases from before the fix (schema 1) are rejected on read
+        mktempdir() do tmp
+            path = joinpath(tmp, "schema1.jld2")
+            d8 = domain(1, 1, 8, 16)
+            spectral_basis(:linear, 1.0, d8, 10; show_progress = false,
+                filename = path, spectral_io = :write)
+            @test spectral_basis(:linear, 1.0, d8, 10; filename = path,
+                spectral_io = :read) isa StirMix.SpectralBasis
+            jldopen(path, "a+") do f
+                delete!(f, "meta/schema_version")
+                f["meta/schema_version"] = 1
+            end
+            @test_throws ArgumentError spectral_basis(:linear, 1.0, d8, 10;
+                filename = path, spectral_io = :read)
+        end
     end
 end

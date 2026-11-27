@@ -22,12 +22,12 @@ Internally the spectral code works in the Hill-equation variable `ỹ = y / 2 �
 grid points are the same in both coordinates; only the label differs.
 """
 function domain(L::Real, M::Integer, Nx::Integer, Ny::Integer)
-    # L is the aspect ratio; with the y period 2π, the x period is 2πL (ADR-004)
+    # L is the aspect ratio; with the y period 2π, the x period is 2πL
     Lx = 2π * L / M
     ω0 = 1 / Lx
     K = ω0 .* (0:(Nx ÷ 2))
     Δx = Lx / Nx
-    # create x array with cell-centred points, consistent with y (ADR-002)
+    # create x array with cell-centred points, consistent with y
     x = -Lx / 2 .+ ((1:Nx) .- 0.5) .* Δx
     Δy = 2π * M / Ny
     # create y array with cell-centred points, walls not included
@@ -70,6 +70,17 @@ The cross-stream grid in the Hill-equation variable `ỹ = dom.y / 2 ∈ (0, π)
 the spectral code. `dom.y` moved to the physical coordinate.
 """
 _ytilde(dom::Domain) = dom.y ./ 2
+
+"""
+    _y_extension_scale(even_extension) -> 4 or 1
+
+Scale of the y domain under the even periodic extension. The extension doubles the
+y domain, so the Hill variable is `y/4` instead of `y/2`: q scales by this factor and
+the y eigenvalue (`an/4` and the tail `m²`) by its inverse. `k²` and the mean-flow
+shift are unscaled. The single definition of the extension's scale constants
+(BUG-005).
+"""
+_y_extension_scale(even_extension::Bool) = even_extension ? 4 : 1
 
 """
     even_extension(f, y) -> (f_ext, y_ext)
