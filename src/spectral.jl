@@ -376,7 +376,8 @@ function flow_decomposition(U::AbstractVector, domain::Domain)
     if any(abs.(β_o[1:nb]) .> 1e-2)
         even_extension = true
         U1 = U .- (β0 / 2)
-        U2 = -U1
+        # see https://github.com/Mikejmnez/StirMix.jl/issues/37
+        U2 = reverse(U1)
         U = (β0 / 2) .+ vcat(U1, U2)
         ny = vcat(y, pi .+ y)
         β0, β, _ = normal_mode_decomposition(U, ny; Lx = 2π)
