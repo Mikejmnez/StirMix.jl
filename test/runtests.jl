@@ -764,6 +764,27 @@ end
         @test minimum(round.(abs.(α[2:2:end]), digits = 10)) === 0.0
     end
 
+    @testset "sampled non-even flow: extension is the mirror" begin
+        # BUG-006: the extension must mirror the fluctuation about the wall ỹ = π,
+        # not flip its sign, or its even-about-centre part (here 0.3cos(2y)) is lost
+        dom = domain(1, 1, 8, 128)
+        ỹ = StirMix._ytilde(dom)
+        s = vcat(ỹ, π .+ ỹ)
+        ramp = dom.y ./ 2π
+        U = ramp .+ 0.3cos.(2dom.y)
+        Uext, _, β, ext = StirMix.flow_decomposition(U, dom)
+        @test ext
+        m = sum(U) / length(U)
+        @test isapprox(Uext, m .+ vcat(U .- m, reverse(U .- m)); atol = 1e-14)
+        # cos(2y) = cos(4ỹ): index 4 in the extension frame, on top of the ramp's
+        # triangle-wave coefficient there
+        _, _, βr, _ = StirMix.flow_decomposition(ramp, dom)
+        @test isapprox(β[4], βr[4] + 0.3; atol = 1e-12)
+        # no sine content in the extended flow
+        _, _, βs = StirMix.normal_mode_decomposition(Uext, s; Lx = 2π)
+        @test maximum(abs, βs) ≤ 1e-12
+    end
+
     @testset "tail normal modes" begin
         Nx = 20
         Ny = 200
